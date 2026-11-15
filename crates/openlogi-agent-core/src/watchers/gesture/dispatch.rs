@@ -1,5 +1,6 @@
 //! Resolve captured HID++ inputs against the active per-device plan.
 
+mod crown;
 mod wheel;
 
 use std::collections::{HashMap, HashSet};
@@ -104,6 +105,7 @@ pub(super) struct InputDispatcher {
     wheels: SessionWheels,
     held_presses: HeldPresses,
     shift_held: HeldShift,
+    crown: crown::CrownFunctions,
 }
 
 impl InputDispatcher {
@@ -115,6 +117,7 @@ impl InputDispatcher {
             wheels: SessionWheels::default(),
             held_presses: HeldPresses::default(),
             shift_held: HeldShift::default(),
+            crown: crown::CrownFunctions::default(),
         }
     }
 
@@ -126,6 +129,7 @@ impl InputDispatcher {
 
     /// Cancel every input lifecycle retained for one capture session.
     pub(super) fn cancel_session(&mut self, session: &HidppSessionId) {
+        self.crown.cancel(session, &self.outputs);
         self.outputs.cancel_session(session);
         self.wheels.cancel_session(session);
         self.held_presses.cancel_session(session);
@@ -204,6 +208,9 @@ impl InputDispatcher {
         input: CapturedInput,
     ) {
         let key = session.device_key();
+        if self.crown.dispatch(session, plan, input, &self.outputs) {
+            return;
+        }
         match input {
             CapturedInput::Gesture(button, direction) => {
                 let Some(press) = self.held_presses.get(session, button) else {

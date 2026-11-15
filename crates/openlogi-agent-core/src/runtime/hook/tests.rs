@@ -29,36 +29,7 @@ fn attributed_sources_still_follow_the_device_policy() {
     assert!(button_source_may_remap(Some(&logitech_mouse)));
 }
 
-fn test_dispatcher() -> (
-    ActionDispatcher,
-    super::super::button::ButtonRuntimeOwner,
-    mpsc::Receiver<super::super::button::ButtonRuntimeEvent>,
-) {
-    let (events, received) = mpsc::channel();
-    let owner = super::super::button::ButtonRuntimeOwner::spawn(move |event| {
-        events
-            .send(event)
-            .expect("test receiver should stay connected");
-    })
-    .expect("button worker should start");
-    let (action_ring, _ring_events) = tokio::sync::mpsc::unbounded_channel();
-    let dispatcher = ActionDispatcher {
-        executor: super::super::ActionExecutor {
-            dpi_cycle: Arc::new(RwLock::new(crate::DpiCycles::default())),
-            pointer_speeds: Arc::default(),
-            access: crate::hardware::DeviceAccess {
-                channel: Arc::new(RwLock::new(None)),
-                registry: openlogi_hid::ChannelRegistry::default(),
-                receiver_access: crate::receiver_access::ReceiverAccess::default(),
-                device_io: openlogi_hid::device_io_channel().1,
-                transport_turns: crate::hardware::TransportTurns::default(),
-            },
-            requests: action_ring,
-        },
-        buttons: owner.input(),
-    };
-    (dispatcher, owner, received)
-}
+use crate::runtime::testing::test_dispatcher;
 
 /// A hold of `press` begun now.
 fn held(press: PressToken) -> PressPhase {

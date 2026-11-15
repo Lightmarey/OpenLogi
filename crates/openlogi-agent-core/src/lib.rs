@@ -13,6 +13,7 @@
 pub mod action_ring;
 pub mod backlight_overlay;
 pub mod capture_plan;
+pub mod crown;
 mod dpi;
 pub mod event_monitor;
 pub mod flow;

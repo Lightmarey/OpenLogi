@@ -59,6 +59,7 @@ pub struct GestureOutputs {
     actions: ActionDispatcher,
     scroll: ScrollInputHandle,
     hook_maps: SharedHookMaps,
+    crown: Arc<crate::crown::CrownDisplay>,
 }
 
 impl GestureOutputs {
@@ -68,11 +69,13 @@ impl GestureOutputs {
         actions: ActionDispatcher,
         scroll: ScrollInputHandle,
         hook_maps: SharedHookMaps,
+        crown: Arc<crate::crown::CrownDisplay>,
     ) -> Self {
         Self {
             actions,
             scroll,
             hook_maps,
+            crown,
         }
     }
 

@@ -119,6 +119,7 @@ fn spawn_ipc_server(
         pairing,
         event_monitor,
         Arc::clone(&inputs.ring),
+        Arc::clone(&inputs.crown),
         inputs.dispatcher.clone(),
         backlight_overlay,
     );
@@ -130,6 +131,7 @@ fn spawn_ipc_server(
 /// until an action is dispatched, so [`bootstrap`] may start them.
 pub(crate) struct InputServices {
     pub(crate) ring: Arc<ActionRingManager>,
+    pub(crate) crown: Arc<openlogi_agent_core::crown::CrownDisplay>,
     pub(crate) triggers: tokio::sync::mpsc::UnboundedReceiver<ActionRequest>,
     pub(crate) dispatcher: ActionDispatcher,
     action_runtime: ActionRuntime,
@@ -164,6 +166,7 @@ impl InputServices {
         let scroll_input = scroll_runtime.input();
         Some(Self {
             ring,
+            crown: Arc::default(),
             triggers,
             dispatcher,
             action_runtime,
@@ -214,6 +217,7 @@ pub(crate) fn spawn_hidpp_watchers(
             inputs.dispatcher.clone(),
             inputs.scroll_input.clone(),
             shared.hook_maps.clone(),
+            Arc::clone(&inputs.crown),
         ),
     );
     let host_switch = watchers::host_switch::spawn(

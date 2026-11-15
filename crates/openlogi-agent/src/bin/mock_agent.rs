@@ -1057,6 +1057,13 @@ impl Agent for MockAgent {
         }
     }
 
+    async fn observe_crown(self, _: Context, since: Generation) -> openlogi_ipc::CrownObservation {
+        if since == 1 {
+            tokio::time::sleep(openlogi_ipc::OBSERVE_HOLD).await;
+        }
+        openlogi_ipc::CrownObservation::new(1, None)
+    }
+
     async fn observe_backlight(self, _: Context, since: Generation) -> BacklightObservation {
         self.backlight.observe(since).await
     }

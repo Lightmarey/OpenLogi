@@ -15,6 +15,7 @@ use std::time::Duration;
 use openlogi_core::app::ForegroundApp;
 use openlogi_core::binding::{ActionRingIcon, ActionRingSize, ActionRingSlot};
 use openlogi_core::config::{ConfigRevision, FlowPeerName, FlowPublicKey, Lighting};
+use openlogi_core::crown::{CrownFunctionId, CrownProfile};
 use openlogi_core::device::{
     BatteryInfo, ChangedOnLight, DeviceInventory, DeviceKind, LightState, LockKey, StandaloneDevice,
 };
@@ -964,6 +965,68 @@ pub enum ClientKind {
     Overlay,
 }
 
+/// Literal name and shared icon for one Crown function; contains no action.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct CrownFunctionPresentation {
+    /// Stable identity, retained after reordering or renaming.
+    pub id: CrownFunctionId,
+    /// User-authored display name, rendered verbatim.
+    pub name: String,
+    /// Icon from the shared embedded catalogue.
+    pub icon: ActionRingIcon,
+    /// Read-only feedback read by the native presenter.
+    pub feedback: Option<openlogi_core::crown::CrownFeedback>,
+}
+
+/// Non-executable snapshot of the Crown's selected function.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct CrownHud {
+    /// Functions in cycling order.
+    pub functions: Vec<CrownFunctionPresentation>,
+    /// Stable identity of the selected function.
+    pub selected: CrownFunctionId,
+}
+
+impl CrownHud {
+    /// Derive a presentation snapshot from a validated profile.
+    #[must_use]
+    pub fn new(profile: &CrownProfile, selected: CrownFunctionId) -> Self {
+        Self {
+            functions: profile
+                .functions()
+                .iter()
+                .map(|function| CrownFunctionPresentation {
+                    id: function.id().clone(),
+                    name: function.name().to_owned(),
+                    icon: function.icon(),
+                    feedback: function.feedback(),
+                })
+                .collect(),
+            selected,
+        }
+    }
+}
+
+/// Crown HUD state stamped by the agent, with the standard observe contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct CrownObservation {
+    /// Pass back to [`Agent::observe_crown`].
+    pub generation: Generation,
+    /// `None` authoritatively hides the HUD.
+    pub hud: Option<CrownHud>,
+}
+
+impl CrownObservation {
+    /// Construct an observation with its generation and complete display state.
+    #[must_use]
+    pub const fn new(generation: Generation, hud: Option<CrownHud>) -> Self {
+        Self { generation, hud }
+    }
+}
+
 #[tarpc::service]
 pub trait Agent {
     /// Wire-protocol version, for the connect handshake.
@@ -1264,4 +1327,7 @@ pub trait Agent {
     /// held trigger cancels instead of choosing the slot last reported by
     /// [`Agent::action_ring_hover`].
     async fn action_ring_unhover(session_id: u64) -> Result<(), ActionRingCommandError>;
+
+    /// Observe the agent-owned Crown HUD state.
+    async fn observe_crown(since: Generation) -> CrownObservation;
 }

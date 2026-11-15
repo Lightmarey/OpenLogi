@@ -127,6 +127,14 @@ impl Agent for TestAgent {
         unreachable!("profile capture must use one snapshot")
     }
 
+    async fn observe_crown(
+        self,
+        _: TarpcContext,
+        _since: Generation,
+    ) -> openlogi_ipc::CrownObservation {
+        openlogi_ipc::CrownObservation::new(1, None)
+    }
+
     async fn observe_backlight(self, _: TarpcContext, _since: Generation) -> BacklightObservation {
         unreachable!("profile capture must use one snapshot")
     }

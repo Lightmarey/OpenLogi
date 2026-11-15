@@ -60,6 +60,7 @@ pub struct AgentServer {
     pub pairing: Arc<PairingManager>,
     pub event_monitor: SharedEventMonitor,
     pub action_ring: Arc<ActionRingManager>,
+    pub crown: Arc<openlogi_agent_core::crown::CrownDisplay>,
     pub dispatcher: ActionDispatcher,
     pub ring_haptics: RingHapticPlayer,
     pub backlight_overlay: BacklightOverlayManager,
@@ -82,6 +83,7 @@ impl AgentServer {
         pairing: Arc<PairingManager>,
         event_monitor: SharedEventMonitor,
         action_ring: Arc<ActionRingManager>,
+        crown: Arc<openlogi_agent_core::crown::CrownDisplay>,
         dispatcher: ActionDispatcher,
         backlight_overlay: BacklightOverlayManager,
     ) -> (Self, tokio::sync::mpsc::UnboundedReceiver<ClientKind>) {
@@ -95,6 +97,7 @@ impl AgentServer {
                 pairing,
                 event_monitor,
                 action_ring,
+                crown,
                 dispatcher,
                 ring_haptics,
                 backlight_overlay,
@@ -523,6 +526,10 @@ impl Agent for AgentServer {
         // Superseded by `observe_action_ring`; nothing calls this, and a
         // matching-version overlay never will (see the trait's note).
         None
+    }
+
+    async fn observe_crown(self, _: Context, since: Generation) -> openlogi_ipc::CrownObservation {
+        self.crown.observe(since).await
     }
 
     async fn observe_action_ring(self, _: Context, since: Generation) -> RingObservation {

@@ -1,0 +1,350 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::Duration;
+
+use openlogi_core::binding::Action;
+use openlogi_core::config::{ThumbwheelSensitivity, VerticalScrollSensitivity};
+use openlogi_core::crown::CrownProfile;
+
+use crate::runtime::scroll::{ScrollPreferences, ScrollRuntime};
+use crate::runtime::testing::{ButtonRuntimeEvent, EndReason, test_dispatcher};
+
+use super::*;
+
+fn plan(scope: Option<&str>) -> DispatchPlan {
+    let mut profile = CrownProfile::default();
+    profile.set_enabled(true);
+    DispatchPlan {
+        config_key: "craft".into(),
+        // Direct bindings must never run alongside the selected function.
+        bindings: BTreeMap::from([(ButtonId::CrownRight, Action::Copy.into())]),
+        gesture_bindings: BTreeMap::new(),
+        side_gesture_bindings: BTreeMap::new(),
+        thumbwheel_sensitivity: ThumbwheelSensitivity::DEFAULT,
+        pointer: None,
+        invert_wheel: false,
+        momentum: openlogi_core::config::MomentumScrolling::default(),
+        shift_bindings: BTreeMap::new(),
+        crown: Some(CrownDispatch {
+            scope: scope.map(str::to_owned),
+            profile,
+        }),
+    }
+}
+
+fn touch_plan(scope: Option<&str>) -> DispatchPlan {
+    let mut plan = plan(scope);
+    plan.crown
+        .as_mut()
+        .unwrap()
+        .profile
+        .set_selection_trigger(CrownSelectionTrigger::TouchTap);
+    plan
+}
+
+#[tokio::test]
+async fn press_selects_on_release_without_firing_a_binding_and_rotation_consumes_selection() {
+    let (actions, mut buttons, events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let display = Arc::new(crate::crown::CrownDisplay::default());
+    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), display.clone());
+    let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
+    let session = HidppSessionId::new("craft");
+    let mut policy = plan(None);
+    let profile = &mut policy.crown.as_mut().unwrap().profile;
+    let mut functions = profile.functions().to_vec();
+    functions[1]
+        .set_binding(CrownControl::PressedRight, Action::NextTab.into())
+        .unwrap();
+    *profile = CrownProfile::new(true, functions).unwrap();
+    for button in [ButtonId::CrownTouch, ButtonId::CrownPress] {
+        dispatcher.dispatch(&session, &policy, CapturedInput::ButtonDown(button));
+    }
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "volume"
+    );
+    dispatcher.dispatch(
+        &session,
+        &policy,
+        CapturedInput::ButtonUp(ButtonId::CrownPress),
+    );
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "workspaces"
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "the stored Mute press binding is reserved for selection"
+    );
+    dispatcher.dispatch(&session, &policy, CapturedInput::CrownTap);
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "workspaces"
+    );
+    for input in [
+        CapturedInput::ButtonDown(ButtonId::CrownPress),
+        CapturedInput::CrownRotation {
+            slots: 6,
+            ratchets: 1,
+        },
+        CapturedInput::ButtonPulse(ButtonId::CrownPressedRight),
+        CapturedInput::ButtonUp(ButtonId::CrownPress),
+    ] {
+        dispatcher.dispatch(&session, &policy, input);
+    }
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "workspaces"
+    );
+    let ButtonRuntimeEvent::Started(press) = events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("pressed rotation started");
+    };
+    assert_eq!(press.start_action(), Some(&Action::NextTab));
+    assert!(matches!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        ButtonRuntimeEvent::Ended {
+            reason: EndReason::Released,
+            ..
+        }
+    ));
+    assert!(
+        events.try_recv().is_err(),
+        "pressed rotation must not switch or run a press action"
+    );
+    for input in [
+        CapturedInput::ButtonDown(ButtonId::CrownPress),
+        CapturedInput::CrownRotation {
+            slots: 1,
+            ratchets: 0,
+        },
+        CapturedInput::ButtonUp(ButtonId::CrownPress),
+    ] {
+        dispatcher.dispatch(&session, &policy, input);
+    }
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "workspaces"
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "sub-detent movement consumes selection without expanding a pulse"
+    );
+    dispatcher.cancel_session(&session);
+    assert!(buttons.shutdown());
+    scroll.shutdown();
+}
+
+#[tokio::test]
+async fn tap_selects_once_rotation_uses_selected_function_and_profiles_remember_separately() {
+    let (actions, mut buttons, events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let display = Arc::new(crate::crown::CrownDisplay::default());
+    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), display.clone());
+    let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
+    let session = HidppSessionId::new("craft");
+    let default = touch_plan(None);
+    dispatcher.dispatch(
+        &session,
+        &default,
+        CapturedInput::ButtonDown(ButtonId::CrownTouch),
+    );
+    let observed = display.observe(0).await;
+    assert_eq!(observed.hud.unwrap().selected.as_ref(), "volume");
+    dispatcher.dispatch(&session, &default, CapturedInput::CrownTap);
+    dispatcher.dispatch(
+        &session,
+        &default,
+        CapturedInput::ButtonPulse(ButtonId::CrownRight),
+    );
+    let ButtonRuntimeEvent::Started(press) = events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("pulse started");
+    };
+    assert_eq!(press.start_action(), Some(&Action::NextDesktop));
+    assert!(matches!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        ButtonRuntimeEvent::Ended {
+            reason: EndReason::Released,
+            ..
+        }
+    ));
+    assert!(
+        events.try_recv().is_err(),
+        "direct Copy must not fire as well"
+    );
+    dispatcher.cancel_session(&session);
+    let zen = touch_plan(Some("zen"));
+    dispatcher.dispatch(
+        &session,
+        &zen,
+        CapturedInput::ButtonDown(ButtonId::CrownTouch),
+    );
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "volume"
+    );
+    dispatcher.cancel_session(&session);
+    dispatcher.dispatch(
+        &session,
+        &default,
+        CapturedInput::ButtonDown(ButtonId::CrownTouch),
+    );
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "workspaces"
+    );
+    dispatcher.cancel_session(&session);
+    assert!(buttons.shutdown());
+    scroll.shutdown();
+}
+
+#[tokio::test]
+async fn press_release_is_balanced_and_stale_cancel_cannot_hide_a_replacement() {
+    let (actions, mut buttons, events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let display = Arc::new(crate::crown::CrownDisplay::default());
+    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), display.clone());
+    let mut dispatcher = CrownFunctions::default();
+    let old = HidppSessionId::new("craft");
+    let current = HidppSessionId::new("craft");
+    let policy = touch_plan(None);
+    dispatcher.dispatch(
+        &old,
+        &policy,
+        CapturedInput::ButtonDown(ButtonId::CrownPress),
+        &outputs,
+    );
+    let ButtonRuntimeEvent::Started(press) = events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("press started");
+    };
+    assert_eq!(press.start_action(), Some(&Action::MuteVolume));
+    dispatcher.dispatch(&old, &policy, CapturedInput::CrownTap, &outputs);
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "volume",
+        "pressed Crown cannot tap-select"
+    );
+    dispatcher.dispatch(
+        &old,
+        &policy,
+        CapturedInput::ButtonUp(ButtonId::CrownPress),
+        &outputs,
+    );
+    let ButtonRuntimeEvent::Ended {
+        press: released,
+        reason: EndReason::Released,
+    } = events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("released");
+    };
+    assert_eq!(released.token(), press.token());
+    dispatcher.dispatch(
+        &current,
+        &policy,
+        CapturedInput::ButtonDown(ButtonId::CrownTouch),
+        &outputs,
+    );
+    dispatcher.cancel(&old, &outputs);
+    assert!(display.observe(0).await.hud.is_some());
+    dispatcher.cancel(&current, &outputs);
+    assert!(display.observe(0).await.hud.is_none());
+    assert!(buttons.shutdown());
+    scroll.shutdown();
+}
+
+#[tokio::test]
+async fn crown_thresholds_and_held_output_use_balanced_upstream_lifecycles() {
+    use crate::runtime::testing::CancelReason;
+    use openlogi_core::binding::{Binding, LongPressBinding};
+    let (actions, mut buttons, events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let mut dispatcher = CrownFunctions::default();
+    let mut policy = touch_plan(None);
+    let profile = &mut policy.crown.as_mut().unwrap().profile;
+    let mut functions = profile.functions().to_vec();
+    let held = Action::HoldShortcut("Ctrl+L".parse().unwrap());
+    functions[0]
+        .set_binding(
+            CrownControl::Press,
+            Binding::LongPress(LongPressBinding::new(Action::Copy, held.clone())),
+        )
+        .unwrap();
+    profile.replace_functions(functions).unwrap();
+    let session = HidppSessionId::new("craft");
+    dispatcher.dispatch(
+        &session,
+        &policy,
+        CapturedInput::ButtonDown(ButtonId::CrownPress),
+        &outputs,
+    );
+    let ButtonRuntimeEvent::Started(short) = events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("press starts");
+    };
+    assert_eq!(short.start_action(), None);
+    dispatcher.dispatch(
+        &session,
+        &policy,
+        CapturedInput::ButtonUp(ButtonId::CrownPress),
+        &outputs,
+    );
+    let ButtonRuntimeEvent::Triggered { action, .. } =
+        events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("short action");
+    };
+    assert_eq!(action, Action::Copy);
+    assert!(matches!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        ButtonRuntimeEvent::Ended {
+            reason: EndReason::Released,
+            ..
+        }
+    ));
+    dispatcher.dispatch(
+        &session,
+        &policy,
+        CapturedInput::ButtonDown(ButtonId::CrownPress),
+        &outputs,
+    );
+    assert!(matches!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        ButtonRuntimeEvent::Started(_)
+    ));
+    let ButtonRuntimeEvent::Triggered { action, .. } =
+        events.recv_timeout(Duration::from_secs(2)).unwrap()
+    else {
+        panic!("threshold action");
+    };
+    assert_eq!(action, held);
+    dispatcher.cancel(&session, &outputs);
+    assert!(matches!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        ButtonRuntimeEvent::Ended {
+            reason: EndReason::Canceled(CancelReason::SourceEnded),
+            ..
+        }
+    ));
+    assert!(buttons.shutdown());
+    scroll.shutdown();
+}

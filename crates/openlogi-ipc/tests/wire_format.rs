@@ -1518,6 +1518,21 @@ fn disable_keys_requests_are_appended() {
 }
 
 #[test]
+fn crown_observation_and_appended_rpc() {
+    let profile = openlogi_core::crown::CrownProfile::default();
+    let hud = openlogi_ipc::CrownHud::new(&profile, profile.functions()[0].id().clone());
+    assert_wire(
+        &openlogi_ipc::CrownObservation::new(7, Some(hud)),
+        "07010306766f6c756d6506566f6c756d650f01000a776f726b7370616365730a576f726b7370616365730b00047461627304546162731b0006766f6c756d65",
+    );
+    assert_wire(&AgentRequest::ObserveCrown { since: 7 }, "3a07");
+    assert_wire(
+        &AgentResponse::ObserveCrown(openlogi_ipc::CrownObservation::new(7, None)),
+        "3a0700",
+    );
+}
+
+#[test]
 fn crown_input_names_are_wire_stable() {
     assert_wire(&ButtonId::CrownTouch, "0a43726f776e546f756368");
     assert_wire(&ButtonId::CrownPress, "0a43726f776e5072657373");

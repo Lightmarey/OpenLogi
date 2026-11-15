@@ -9,6 +9,8 @@ mod button;
 pub mod hook;
 mod pointer;
 pub mod scroll;
+#[cfg(test)]
+pub(crate) mod testing;
 
 use std::collections::{HashMap, HashSet};
 use std::io;
