@@ -1,0 +1,24 @@
+@import url("stylesheet.css");
+
+.openlogi-crown-hud.logitech {
+  color: #ededed;
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-tile {
+  background-color: rgba(38, 40, 42, 0.86);
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-tile:checked {
+  background-color: rgba(70, 72, 74, 0.96);
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-tile:parameter {
+  background-color: rgba(38, 40, 42, 0.86);
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-fill {
+  background-color: rgba(70, 72, 74, 0.96);
+}
+
+.openlogi-crown-hud.openlogi { background-color: rgba(20, 20, 20, 0.96); color: #f5f5f5; }
+.openlogi .openlogi-crown-symbol { background-color: #2e2e2e; color: #f5f5f5; }

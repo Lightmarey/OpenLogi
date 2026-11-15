@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.openlogi-crown" path="/org/gnome/shell/extensions/openlogi-crown/">
+    <key name="hud-theme" type="s">
+      <default>'logitech'</default>
+      <choices>
+        <choice value="logitech"/>
+        <choice value="gnome"/>
+        <choice value="openlogi"/>
+      </choices>
+      <summary>Crown presentation skin</summary>
+      <description>Use the Logitech SDK's rectangular appearance, the Shell OSD theme, or the palette provided by OpenLogi. This does not change function bindings.</description>
+    </key>
+    <key name="bottom-margin" type="i">
+      <default>32</default>
+      <range min="8" max="160"/>
+      <summary>Distance from the bottom of the work area</summary>
+      <description>Logical pixels between the Crown panel and the application monitor's bottom work-area edge.</description>
+    </key>
+  </schema>
+</schemalist>

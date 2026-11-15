@@ -17,6 +17,7 @@
 rust_i18n::i18n!("../openlogi-ui/locales", fallback = "en");
 
 mod backlight;
+mod crown;
 mod ipc;
 mod lock_key;
 mod notice;
@@ -60,6 +61,7 @@ fn main() -> Result<()> {
         mut backlights,
         mut notices,
         mut lock_keys,
+        mut crowns,
         commands,
     } = ipc::spawn();
 
@@ -117,6 +119,19 @@ fn main() -> Result<()> {
                     continue;
                 }
                 cx.update(|cx| lock_key::present(cx, observed.shown));
+            }
+        })
+        .detach();
+        cx.spawn(async move |cx| {
+            let mut display = crown::CrownDisplay::default();
+            while let Some(observed) = crowns.recv().await {
+                if observed.hud.is_some()
+                    && let Err(error) = cx.update(windowing::connect).await
+                {
+                    warn!(%error, "could not connect to the display for the Crown HUD");
+                    continue;
+                }
+                cx.update(|cx| display.present(observed.hud, cx));
             }
         })
         .detach();

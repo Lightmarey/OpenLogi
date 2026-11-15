@@ -6351,6 +6351,7 @@ dependencies = [
  "block2 0.6.2",
  "core-graphics 0.25.0",
  "embed-resource",
+ "futures-lite",
  "gpui-pre",
  "gpui-pre-platform",
  "objc2 0.6.4",
@@ -6361,11 +6362,14 @@ dependencies = [
  "openlogi-ui",
  "raw-window-handle",
  "rust-i18n",
+ "serde",
+ "serde_json",
  "succession",
  "tarpc",
  "tokio",
  "tracing",
  "windows-sys 0.61.2",
+ "zbus",
 ]
 
 [[package]]

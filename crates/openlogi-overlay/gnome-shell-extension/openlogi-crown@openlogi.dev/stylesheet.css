@@ -1,0 +1,77 @@
+.openlogi-crown-hud {
+  margin: 0;
+  padding: 12px;
+  spacing: 8px;
+  border-radius: 16px;
+}
+
+.openlogi-crown-row {
+  spacing: 4px;
+}
+
+.openlogi-crown-content {
+  spacing: 6px;
+}
+
+.openlogi-crown-symbol {
+  padding: 0;
+  border-radius: 24px;
+}
+
+.openlogi-crown-name { font-size: 12px; }
+.openlogi-crown-value { font-size: 16px; font-weight: bold; }
+.openlogi-crown-fill { background-color: rgba(128, 128, 128, 0.16); }
+
+.openlogi-crown-hud StLabel {
+  margin: 0;
+  text-align: center;
+}
+
+/* Logitech's SDK reference: contiguous translucent rectangular tiles, with
+ * a brighter selected tile and Kohle monochrome symbols. */
+.openlogi-crown-hud.logitech {
+  padding: 0;
+  spacing: 0;
+  border-radius: 0;
+  background-color: transparent;
+  color: #2f3132;
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-row {
+  spacing: 0;
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-tile {
+  padding: 0;
+  background-color: rgba(224, 224, 224, 0.72);
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-tile:checked {
+  background-color: rgba(244, 244, 244, 0.96);
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-tile:parameter {
+  background-color: rgba(224, 224, 224, 0.72);
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-fill {
+  background-color: rgba(244, 244, 244, 0.96);
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-content { spacing: 8px; }
+
+.openlogi-crown-hud.logitech .openlogi-crown-symbol {
+  padding: 0;
+  border-radius: 0;
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-name {
+  font-size: 14px;
+  max-height: 36px;
+}
+
+.openlogi-crown-hud.logitech .openlogi-crown-value { font-size: 28px; font-weight: normal; }
+
+.openlogi-crown-hud.openlogi { background-color: rgba(247, 247, 247, 0.96); color: #262626; }
+.openlogi .openlogi-crown-symbol { background-color: #e8e8e8; color: #262626; }
+.openlogi .openlogi-crown-icon:checked { color: white; }

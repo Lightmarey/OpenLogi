@@ -1,0 +1,10 @@
+{
+  "uuid": "openlogi-crown@openlogi.dev",
+  "name": "OpenLogi Crown HUD",
+  "description": "Shows Craft Crown functions at the bottom of the application monitor, with adaptive light/dark Logitech rectangular and GNOME skins, or the OpenLogi palette, without changing focus.",
+  "settings-schema": "org.gnome.shell.extensions.openlogi-crown",
+  "gettext-domain": "openlogi-crown",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/AprilNEA/OpenLogi",
+  "version": 1
+}

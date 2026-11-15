@@ -40,6 +40,12 @@ embed-resource = "3.0.9"
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 openlogi-hook = { path = "../openlogi-hook" }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5"
+futures-lite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # CGGetActiveDisplayList/CGDisplayBounds: placing the ring on the cursor's
 # display needs global display bounds, which GPUI's display API doesn't expose

@@ -18,8 +18,8 @@ use openlogi_core::action_ring::DISPLAY_LIFETIME;
 use openlogi_core::binding::ActionRingSlot;
 use openlogi_ipc::client::{self, ConnectError, Observer, Stamped};
 use openlogi_ipc::{
-    ActionRingInvocation, AgentClient, BacklightObservation, ClientKind, LockKeyObservation,
-    NoticeObservation, RingObservation,
+    ActionRingInvocation, AgentClient, BacklightObservation, ClientKind, CrownObservation,
+    LockKeyObservation, NoticeObservation, RingObservation,
 };
 use succession::Standing;
 use tarpc::context;
@@ -64,6 +64,8 @@ pub(crate) struct Handle {
     /// The lock-key change the agent says should be showing, each time that
     /// changes. `None` is no indicator, which is also how one ends.
     pub(crate) lock_keys: mpsc::UnboundedReceiver<LockKeyObservation>,
+    /// Read-only Crown function display, including expiry and agent disconnect.
+    pub(crate) crowns: mpsc::UnboundedReceiver<CrownObservation>,
     /// Where the view reports hover, activation, and cancellation.
     pub(crate) commands: mpsc::UnboundedSender<OverlayCommand>,
 }
@@ -75,6 +77,7 @@ pub(crate) fn spawn() -> Handle {
     let (backlight_tx, backlights) = mpsc::unbounded_channel();
     let (notice_tx, notices) = mpsc::unbounded_channel();
     let (lock_key_tx, lock_keys) = mpsc::unbounded_channel();
+    let (crown_tx, crowns) = mpsc::unbounded_channel();
     let (commands, mut command_rx) = mpsc::unbounded_channel();
     let started = openlogi_core::worker::spawn("openlogi-overlay-ipc", move |runtime| {
         runtime.block_on(async {
@@ -91,6 +94,7 @@ pub(crate) fn spawn() -> Handle {
                 observe(connect, LOCK_KEYS, |observed| lock_key_tx
                     .send(observed)
                     .is_ok()),
+                observe(connect, CROWN, |observed| crown_tx.send(observed).is_ok()),
                 send_commands(&mut command_rx)
             );
         });
@@ -103,6 +107,7 @@ pub(crate) fn spawn() -> Handle {
         backlights,
         notices,
         lock_keys,
+        crowns,
         commands,
     }
 }
@@ -126,6 +131,17 @@ const RING: Cell<RingObservation> = Cell {
     what: "Actions Ring state",
     lost: None,
 };
+
+/// Crown expiry is authoritative in the agent and is cleared on disconnect.
+const CROWN: Cell<CrownObservation> = Cell {
+    open: Observer::crown,
+    what: "Crown HUD",
+    lost: Some(no_crown),
+};
+
+const fn no_crown() -> CrownObservation {
+    CrownObservation::new(0, None)
+}
 
 /// The keyboard-backlight indicator, which the agent hides when its time is
 /// up.
