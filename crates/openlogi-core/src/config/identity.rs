@@ -395,11 +395,38 @@ pub(super) fn fold(device: &mut DeviceConfig, mut legacy: DeviceConfig, route_ke
         );
     }
 
+    fold_crown(&mut device.crown, &mut legacy.crown, route_key);
+
     // `enabled` defaults to `true` and is only ever persisted when `false`,
     // so a legacy `false` is a deliberate "leave this device alone" choice
     // that must not be lost under a canonical entry that never opted out.
     if device.enabled && !legacy.enabled {
         device.enabled = false;
+    }
+}
+
+/// Complete function lists cannot merge, but independent application profiles can.
+fn fold_crown(
+    device: &mut crate::crown::CrownConfig,
+    legacy: &mut crate::crown::CrownConfig,
+    route_key: &str,
+) {
+    let default = crate::crown::CrownProfile::default();
+    if device.default == default {
+        device.default = legacy.default.clone();
+    } else if legacy.default != default && device.default != legacy.default {
+        tracing::warn!(%route_key, field = "crown.default", "Crown profiles differ; keeping the canonical one");
+    }
+    for (key, profile) in std::mem::take(&mut legacy.per_app) {
+        match device.per_app.entry(key) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(profile);
+            }
+            std::collections::btree_map::Entry::Occupied(entry) if entry.get() != &profile => {
+                tracing::warn!(%route_key, app = entry.key(), "Crown application profiles differ; keeping the canonical one");
+            }
+            std::collections::btree_map::Entry::Occupied(_) => {}
+        }
     }
 }
 
@@ -474,6 +501,63 @@ mod tests {
             config.resolve_device_key(&cabled(), Some(&unit)),
             config.resolve_device_key(&on_receiver(), Some(&unit)),
         );
+    }
+
+    #[test]
+    fn crown_only_settings_follow_a_legacy_receiver_key_until_adoption() {
+        let mut config = Config::default();
+        let mut legacy = DeviceConfig::default();
+        legacy.crown.default.set_enabled(true);
+        config.devices.insert(on_receiver().route_key(), legacy);
+        let unit = DeviceIdentity::Unit([0x6b, 0xe9, 0xd3, 0x00]);
+        let resolved = config
+            .resolve_device_key(&on_receiver(), Some(&unit))
+            .unwrap();
+        assert_eq!(resolved.as_str(), "receiver:82839805:slot:1");
+        let canonical = canonical_device_key(&on_receiver(), Some(&unit)).unwrap();
+        assert!(config.adopt_route(&canonical, &on_receiver().route_key(), None));
+        assert!(
+            config.devices[canonical.as_str()]
+                .crown
+                .default
+                .is_enabled()
+        );
+        assert!(!config.devices.contains_key(resolved.as_str()));
+    }
+
+    #[test]
+    fn crown_adoption_merges_independent_apps_and_retains_canonical_conflicts() {
+        use crate::crown::CrownProfile;
+
+        let mut config = Config::default();
+        let unit = DeviceIdentity::Unit([0x6b, 0xe9, 0xd3, 0x00]);
+        let canonical = canonical_device_key(&on_receiver(), Some(&unit)).unwrap();
+        let mut customized = CrownProfile::default();
+        customized.set_enabled(true);
+        let device = config
+            .devices
+            .entry(canonical.as_str().to_owned())
+            .or_default();
+        device
+            .crown
+            .per_app
+            .insert("zen".into(), customized.clone());
+        let mut legacy = DeviceConfig::default();
+        legacy.crown.default = customized.clone();
+        legacy
+            .crown
+            .per_app
+            .insert("zen".into(), CrownProfile::default());
+        legacy
+            .crown
+            .per_app
+            .insert("blender".into(), customized.clone());
+        config.devices.insert(on_receiver().route_key(), legacy);
+        assert!(config.adopt_route(&canonical, &on_receiver().route_key(), None));
+        let crown = &config.devices[canonical.as_str()].crown;
+        assert_eq!(crown.default, customized);
+        assert_eq!(crown.per_app["zen"], customized);
+        assert_eq!(crown.per_app["blender"], customized);
     }
 
     fn litra() -> DeviceStableId {

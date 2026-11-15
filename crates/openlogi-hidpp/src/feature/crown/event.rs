@@ -118,7 +118,8 @@ pub struct CrownUpdate {
 }
 
 /// Decodes the `0x4600` event payload by its sub-id.
-pub(super) fn decode_event(sub_id: u8, payload: &[u8; 16]) -> Option<CrownEvent> {
+#[must_use]
+pub fn decode_event(sub_id: u8, payload: &[u8; 16]) -> Option<CrownEvent> {
     match sub_id {
         0 => Some(CrownEvent::Update(CrownUpdate {
             rotation_state: RotationState::from(payload[0]),

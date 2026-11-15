@@ -217,7 +217,9 @@ fn dispatch_input(
         | CapturedInput::ButtonDiverted(_)
         | CapturedInput::HeldWheel { .. }
         | CapturedInput::MainWheel { .. }
-        | CapturedInput::HostModeEntered => {}
+        | CapturedInput::HostModeEntered
+        | CapturedInput::CrownTap
+        | CapturedInput::CrownRotation { .. } => {}
     }
 }
 

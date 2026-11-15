@@ -288,6 +288,7 @@ impl InputDispatcher {
             CapturedInput::ButtonDiverted(_) => {
                 unreachable!("the session's forwarder records diverted buttons instead")
             }
+            CapturedInput::CrownTap | CapturedInput::CrownRotation { .. } => {}
         }
     }
 

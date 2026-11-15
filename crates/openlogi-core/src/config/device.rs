@@ -15,6 +15,7 @@ use super::settings::{
 use crate::binding::{
     Action, ActionRingConfig, Binding, ButtonId, GKeyProfile, GestureDirection, KeypadPage,
 };
+use crate::crown::CrownConfig;
 use crate::device::{Capabilities, DeviceKind, DeviceModelInfo, LightCapabilities};
 use crate::hid::{DisableKeysMask, Dpi, PointerSpeed, ReportRate};
 
@@ -413,6 +414,9 @@ pub struct DeviceConfig {
     /// keyboard.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub g_key_profile_names: BTreeMap<GKeyProfile, String>,
+    /// Craft Crown function cycling. Default preserves existing direct bindings.
+    #[serde(default, skip_serializing_if = "CrownConfig::is_default")]
+    pub crown: CrownConfig,
 }
 
 impl DeviceConfig {
@@ -527,6 +531,7 @@ impl Default for DeviceConfig {
             g_key_owner: GKeyOwner::Keyboard,
             gaming_key_mode: GamingKeyMode::Profiles,
             g_key_profile_names: BTreeMap::new(),
+            crown: CrownConfig::default(),
         }
     }
 }
@@ -707,6 +712,8 @@ struct RawDeviceConfig {
     enabled: bool,
     #[serde(default)]
     custom_name: Option<String>,
+    #[serde(default)]
+    crown: CrownConfig,
 }
 
 impl From<RawDeviceConfig> for DeviceConfig {
@@ -777,6 +784,7 @@ impl From<RawDeviceConfig> for DeviceConfig {
             g_key_owner: raw.g_key_owner,
             gaming_key_mode: raw.gaming_key_mode,
             g_key_profile_names: raw.g_key_profile_names,
+            crown: raw.crown,
         }
     }
 }

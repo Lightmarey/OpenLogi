@@ -87,6 +87,18 @@ pub struct DispatchPlan {
     pub(crate) pointer: Option<PointerSelection>,
     /// Bindings used while G-Shift is held.
     pub shift_bindings: BTreeMap<ButtonId, Binding>,
+    /// Effective enabled Crown profile, or direct binding mode.
+    pub crown: Option<CrownDispatch>,
+}
+
+/// Complete application-scoped Crown dispatch policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CrownDispatch {
+    /// Canonical matching application key; `None` names the default profile.
+    pub scope: Option<String>,
+    /// Validated function list used by the capture dispatcher.
+    pub profile: openlogi_core::crown::CrownProfile,
 }
 
 /// One device's independently versioned hardware target and dispatch plan.
@@ -397,25 +409,15 @@ pub fn plan_for_device(
             })
         })
         .collect();
-    let thumbwheel_bindings_nondefault = [
-        ButtonId::Thumbwheel,
-        ButtonId::ThumbwheelScrollUp,
-        ButtonId::ThumbwheelScrollDown,
-    ]
-    .iter()
-    .any(|button| {
-        bindings
-            .get(button)
-            .is_some_and(|binding| binding.click_action() != default_binding(*button))
-    });
     let thumbwheel_sensitivity = config.thumbwheel_sensitivity(config_key);
+    let (capture_crown, crown) = crown_plan(config, config_key, app, &bindings);
     DeviceCapturePlan {
         target: CaptureTarget {
             physical_key,
             route,
             spec: CaptureSpec {
-                capture_thumbwheel: thumbwheel_sensitivity != ThumbwheelSensitivity::DEFAULT
-                    || thumbwheel_bindings_nondefault,
+                capture_crown,
+                capture_thumbwheel: capture_thumbwheel(&bindings, thumbwheel_sensitivity),
                 divert_gesture_sources: GESTURE_SOURCE_BUTTONS
                     .into_iter()
                     .filter(|(_, button)| gesture_bindings.contains_key(button))
@@ -441,8 +443,54 @@ pub fn plan_for_device(
             momentum: config.momentum_scrolling(config_key),
             pointer: None,
             shift_bindings: shift_bindings_for(config, config_key),
+            crown,
         },
     }
+}
+
+/// Native thumbwheel settings require no report diversion.
+fn capture_thumbwheel(
+    bindings: &BTreeMap<ButtonId, Binding>,
+    sensitivity: ThumbwheelSensitivity,
+) -> bool {
+    sensitivity != ThumbwheelSensitivity::DEFAULT
+        || [
+            ButtonId::Thumbwheel,
+            ButtonId::ThumbwheelScrollUp,
+            ButtonId::ThumbwheelScrollDown,
+        ]
+        .iter()
+        .any(|button| {
+            bindings
+                .get(button)
+                .is_some_and(|binding| binding.click_action() != default_binding(*button))
+        })
+}
+
+/// Resolve function mode and the direct actions that require firmware ownership.
+fn crown_plan(
+    config: &Config,
+    key: &str,
+    app: Option<&str>,
+    bindings: &BTreeMap<ButtonId, Binding>,
+) -> (bool, Option<CrownDispatch>) {
+    let crown = config.devices.get(key).and_then(|device| {
+        let (scope, profile) = device.crown.resolve(&config.apps, app);
+        profile.is_enabled().then(|| CrownDispatch {
+            scope: scope.map(str::to_owned),
+            profile: profile.clone(),
+        })
+    });
+    let capture = crown.is_some()
+        || ButtonId::CROWN.iter().any(|button| {
+            bindings.get(button).is_some_and(|binding| match binding {
+                Binding::LongPress(pair) => {
+                    *pair.short() != Action::None || *pair.long() != Action::None
+                }
+                binding => binding.click_action() != Action::None,
+            })
+        });
+    (capture, crown)
 }
 
 #[cfg(test)]
@@ -673,6 +721,91 @@ mod tests {
         cfg.set_onboard_memory("g502", Some(OnboardMemory::Off));
         let plan = plan_for_device(&cfg, "g502", route(), None, 0, true).with_onboard(&cfg, None);
         assert_eq!(plan.target.spec.onboard, None);
+    }
+
+    #[test]
+    fn crown_capture_is_opt_in_and_uses_per_application_bindings() {
+        let mut config = Config::default();
+        assert!(
+            !plan_for_device(&config, "craft", route(), None, 0, true)
+                .target
+                .spec
+                .capture_crown
+        );
+        config.set_binding("craft", ButtonId::CrownRight, Action::VolumeUp.into());
+        let plan = plan_for_device(&config, "craft", route(), None, 0, true);
+        assert!(plan.target.spec.capture_crown);
+        assert_eq!(
+            plan.dispatch.bindings.get(&ButtonId::CrownRight),
+            Some(&Binding::Single(Action::VolumeUp))
+        );
+        assert!(
+            !plan_for_device(&config, "other-device", route(), None, 0, true)
+                .target
+                .spec
+                .capture_crown
+        );
+        config.set_per_app_binding("craft", "Blender", ButtonId::CrownRight, Some(Action::None));
+        assert!(
+            !plan_for_device(&config, "craft", route(), Some("Blender"), 0, true)
+                .target
+                .spec
+                .capture_crown
+        );
+        config.set_per_app_binding(
+            "craft",
+            "Blender",
+            ButtonId::CrownPressedRight,
+            Some(Action::NextTab),
+        );
+        let app = plan_for_device(&config, "craft", route(), Some("Blender"), 0, true);
+        assert!(app.target.spec.capture_crown);
+        assert_eq!(
+            app.dispatch.bindings.get(&ButtonId::CrownPressedRight),
+            Some(&Binding::Single(Action::NextTab))
+        );
+    }
+
+    #[test]
+    fn crown_hold_with_only_a_long_action_still_arms_capture() {
+        let mut config = Config::default();
+        config.set_binding(
+            "craft",
+            ButtonId::CrownPress,
+            Binding::LongPress(openlogi_core::binding::LongPressBinding::new(
+                Action::None,
+                Action::Copy,
+            )),
+        );
+        assert!(
+            plan_for_device(&config, "craft", route(), None, 0, true)
+                .target
+                .spec
+                .capture_crown
+        );
+    }
+
+    #[test]
+    fn crown_function_profiles_arm_without_direct_bindings_and_apps_can_disable_them() {
+        use openlogi_core::crown::CrownProfile;
+
+        let mut config = Config::default();
+        let device = config.devices.entry("craft".into()).or_default();
+        device.crown.default.set_enabled(true);
+        device
+            .crown
+            .per_app
+            .insert("zen".into(), CrownProfile::default());
+        let default = plan_for_device(&config, "craft", route(), None, 0, true);
+        assert!(default.target.spec.capture_crown);
+        assert!(default.dispatch.crown.is_some());
+        assert!(config.devices["craft"].bindings.is_empty());
+        let zen = plan_for_device(&config, "craft", route(), Some("zen"), 0, true);
+        assert!(!zen.target.spec.capture_crown);
+        assert!(zen.dispatch.crown.is_none());
+        let blender = plan_for_device(&config, "craft", route(), Some("blender"), 0, true);
+        assert!(blender.target.spec.capture_crown);
+        assert_eq!(blender.dispatch.crown.unwrap().scope, None);
     }
 
     #[test]

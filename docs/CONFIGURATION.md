@@ -55,9 +55,12 @@ header before parsing its fields. A v9 file without the policy still loads.
 v11 adds the `[flow]` section. Older readers reject a v11 header before
 parsing its fields. A v10 file without the section loads with Flow disabled.
 
+v12 adds per-device Crown functions and application profiles. Older files keep
+Crown inputs in direct-binding mode.
+
 ## Shape
 
-`schema_version` is required and currently `11`. `selected_device` is an
+`schema_version` is required and currently `12`. `selected_device` is an
 optional physical device key.
 
 `[app_settings]` contains application-wide preferences:
@@ -686,3 +689,43 @@ Top = { action = { CustomShortcut = "Cmd+Shift+P" }, icon = "Keyboard", label = 
 ```
 
 `ShowActionsRing` is rejected inside a ring slot to prevent recursive rings.
+
+## Craft Crown
+
+On a Craft keyboard, open **Keys → Crown…**. Direct mode exposes touch, press,
+left/right rotation and left/right rotation while pressed. Touch and press retain
+real down/up edges for short presses, long presses and held shortcuts. Rotation
+accepts a single tapped action. Direct application overrides follow the existing
+single-action binding model.
+
+Enable **Crown function mode** to start with Volume, Workspaces and Tabs. A profile
+contains 1–8 functions with stable IDs. Add, rename, remove and reorder them in the
+same panel. Each function binds its rotation, pressed rotation and optional press
+through the existing action catalog, shortcut recorder, application target and
+shell-command fields. The editor validates the input lifecycle before saving.
+
+The default **Press and release** selector reserves the press action. A press that
+rotates, including movement shorter than one detent, leaves the current function
+selected. **Touch gesture Tap** selects on a clean firmware tap and enables press
+bindings. The selected function is remembered separately for each device and
+application scope during the agent run. Configuration edits retain function IDs.
+
+`devices.<key>.crown.default` is the device profile. Each
+`devices.<key>.crown.per_app.<app>` replaces the complete profile for its application.
+Application identifiers and `app:<alias>` selectors use the existing application
+matcher. An inherited profile can be edited in the current application scope to
+create an override. A disabled application profile uses its direct input bindings.
+The [complete example](config.example.toml) contains all three starter functions.
+
+The agent publishes a read-only HUD while the Crown is touched or pressed and for
+800 ms after release. On GNOME Wayland, install the bundled
+[Crown HUD extension](../crates/openlogi-overlay/gnome-shell-extension/README.md).
+It provides Logitech, GNOME and OpenLogi skins, live light/dark themes, bottom
+spacing and authoritative output-volume feedback, including mute and output-device
+changes. Other desktops use the existing overlay window placement infrastructure.
+
+Saving uses the existing atomic configuration path and reports failures in the
+settings app. Disconnecting or changing profiles releases held output and ends the
+old HUD session. If the GNOME extension is disabled, re-enable it to recover the
+current HUD automatically. A bridge-version mismatch recovers after compatible
+overlay and extension versions are installed.

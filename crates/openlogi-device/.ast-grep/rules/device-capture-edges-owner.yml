@@ -1,0 +1,12 @@
+# Owner: session::gesture::arm::ArmedControls::edge_controls.
+# Capture observers and input decoding must count the same wheel-hold press edges.
+id: device-capture-edges-owner
+language: rust
+severity: error
+message: Use ArmedControls::edge_controls for plain and wheel-hold press controls.
+files:
+  - crates/openlogi-device/src/**/*.rs
+ignores:
+  - crates/openlogi-device/src/session/gesture/arm.rs
+rule:
+  pattern: $ARMED.button_cids.iter().chain(&$ARMED.wheel_button_cids)

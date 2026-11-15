@@ -306,6 +306,7 @@ fn same_bindings(a: &DispatchPlan, b: &DispatchPlan) -> bool {
         momentum,
         pointer: _,
         shift_bindings,
+        crown,
     } = a;
     *config_key == b.config_key
         && *bindings == b.bindings
@@ -315,6 +316,7 @@ fn same_bindings(a: &DispatchPlan, b: &DispatchPlan) -> bool {
         && *invert_wheel == b.invert_wheel
         && *momentum == b.momentum
         && *shift_bindings == b.shift_bindings
+        && *crown == b.crown
 }
 
 fn reconcile_session(

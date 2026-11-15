@@ -98,7 +98,15 @@ impl Config {
         self.devices
             .get(device_key)
             .into_iter()
-            .flat_map(|device| device.per_app_bindings.keys().map(String::as_str))
+            .flat_map(|device| {
+                device
+                    .per_app_bindings
+                    .keys()
+                    .chain(device.crown.per_app.keys())
+            })
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
     }
 
     /// Drop `device_key`'s whole profile for `app`. Nothing happens when there
@@ -106,6 +114,7 @@ impl Config {
     pub fn remove_app_profile(&mut self, device_key: &str, app: &str) {
         if let Some(device) = self.devices.get_mut(device_key) {
             device.per_app_bindings.remove(app);
+            device.crown.per_app.remove(app);
         }
     }
 
@@ -118,6 +127,7 @@ impl Config {
         self.devices.get(device_key).is_some_and(|d| {
             overlay_for(&d.per_app_bindings, &self.apps, app)
                 .is_some_and(|overlay| !overlay.is_empty())
+                || overlay_for(&d.crown.per_app, &self.apps, app).is_some()
         })
     }
 
@@ -144,6 +154,7 @@ impl Config {
                 .per_app_bindings
                 .keys()
                 .chain(device.action_ring.per_app.keys())
+                .chain(device.crown.per_app.keys())
                 .find(|key| self.apps.is_undefined_reference(key))
                 .map(|key| (device_key.as_str(), key.as_str()))
         })

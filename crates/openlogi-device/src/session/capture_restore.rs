@@ -21,6 +21,7 @@ use super::gesture::main_wheel;
 use super::restore::{PendingRestore, RestoreOutcome, RestorePlan, SessionFailure};
 use crate::backend::BackendError;
 use crate::channel::registry::PublicationState;
+use crate::crown::{Crown, ReportingMode};
 use crate::reprog_controls::{self, ReprogControlsV4};
 use crate::thumbwheel::{self, Thumbwheel, ThumbwheelStatus};
 use crate::{ChannelRegistry, DeviceRoute, IoSuspended, SharedChannel};
@@ -355,6 +356,7 @@ pub struct CaptureRestorePlan {
     main_wheel: Option<HiResWheelRestore>,
     spy: Option<SpyRestore>,
     g_keys: Option<GKeysRestore>,
+    crown_index: Option<u8>,
 }
 
 impl fmt::Debug for CaptureRestorePlan {
@@ -371,6 +373,7 @@ impl fmt::Debug for CaptureRestorePlan {
             .field("has_main_wheel", &self.main_wheel.is_some())
             .field("host_mode", &self.spy.is_some())
             .field("g_key_row", &self.g_keys.is_some())
+            .field("has_crown", &self.crown_index.is_some())
             .finish()
     }
 }
@@ -416,8 +419,16 @@ impl RestorePlan for CaptureRestorePlan {
             restored &= spy.restore_on(&channel, device_index).await;
         }
         if let Some(g_keys) = self.g_keys {
-            let feature = GamingGKeysFeature::new(channel, device_index, g_keys.feature_index);
+            let feature =
+                GamingGKeysFeature::new(channel.clone(), device_index, g_keys.feature_index);
             restored &= restore_result(feature.release_row().await, "G-key row");
+        }
+        if let Some(feature_index) = self.crown_index {
+            let crown = Crown::new(channel, device_index, feature_index);
+            // An old, already-diverted mode may be a crashed owner's residue.
+            // End software ownership by restoring native reporting, leaving
+            // ratchet mode and every timing parameter unchanged.
+            restored &= restore_result(crown.set_reporting(ReportingMode::Hid).await, "crown");
         }
         restored
     }
@@ -446,6 +457,7 @@ impl PendingCaptureRestore {
                 main_wheel: None,
                 spy: None,
                 g_keys: None,
+                crown_index: None,
             },
         )
     }
@@ -459,12 +471,14 @@ impl PendingCaptureRestore {
         main_wheel: Option<HiResWheelRestore>,
         spy: Option<SpyRestore>,
         g_keys: Option<GKeysRestore>,
+        crown_index: Option<u8>,
     ) -> Option<Self> {
         if reprog.is_none()
             && thumb.is_none()
             && main_wheel.is_none()
             && spy.is_none()
             && g_keys.is_none()
+            && crown_index.is_none()
         {
             return None;
         }
@@ -476,6 +490,7 @@ impl PendingCaptureRestore {
                 main_wheel,
                 spy,
                 g_keys,
+                crown_index,
             },
         ))
     }

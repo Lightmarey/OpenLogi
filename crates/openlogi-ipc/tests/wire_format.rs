@@ -119,7 +119,7 @@ fn representative_smartshift_status() -> SmartShiftStatus {
 /// unreleased version and leave this pin alone (`crates/openlogi-ipc/AGENTS.md`).
 #[test]
 fn protocol_version_is_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 46);
+    assert_eq!(PROTOCOL_VERSION, 47);
 }
 
 #[test]
@@ -975,6 +975,7 @@ fn device_inventory() {
                 m_keys: false,
                 macro_record: false,
                 change_host: false,
+                crown: false,
             }),
             settings_revision: 7,
             hidpp10: false,
@@ -982,7 +983,7 @@ fn device_inventory() {
     }];
     assert_wire(
         &inventory,
-        "010d426f6c74205265636569766572fb6d04fb48c501084630304443414645010101094d58204d535452335301fb34b00001010150020001030106323134304c5a0102030400010100fb34b0fb8240000b01010100000101010101000101010101010100000001000000000700",
+        "010d426f6c74205265636569766572fb6d04fb48c501084630304443414645010101094d58204d535452335301fb34b00001010150020001030106323134304c5a0102030400010100fb34b0fb8240000b0101010000010101010100010101010101010000000100000000000700",
     );
 }
 
@@ -1513,5 +1514,21 @@ fn disable_keys_requests_are_appended() {
             desired: DisableKeysMask::CAPS_LOCK,
         },
         "2d000846303044434146450101",
+    );
+}
+
+#[test]
+fn crown_input_names_are_wire_stable() {
+    assert_wire(&ButtonId::CrownTouch, "0a43726f776e546f756368");
+    assert_wire(&ButtonId::CrownPress, "0a43726f776e5072657373");
+    assert_wire(&ButtonId::CrownLeft, "0943726f776e4c656674");
+    assert_wire(&ButtonId::CrownRight, "0a43726f776e5269676874");
+    assert_wire(
+        &ButtonId::CrownPressedLeft,
+        "1043726f776e507265737365644c656674",
+    );
+    assert_wire(
+        &ButtonId::CrownPressedRight,
+        "1143726f776e507265737365645269676874",
     );
 }

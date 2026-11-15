@@ -7,6 +7,9 @@ fn canonical_configuration_example_parses() {
     let body = include_str!("../../../../../docs/config.example.toml");
     let config: Config = toml::from_str(body).expect("documented config must parse");
     assert_eq!(config.schema_version, SCHEMA_VERSION);
+    let crown = &config.devices["unit:1234cafe"].crown.default;
+    assert!(crown.is_enabled());
+    assert_eq!(crown.functions().len(), 3);
     let bindings = config.stored_bindings("receiver:aabbccdd:slot:1");
     let Some(Binding::LongPress(long_press)) = bindings.get(&ButtonId::DpiToggle) else {
         panic!("documented long-press binding should keep its shape");

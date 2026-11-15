@@ -1,5 +1,5 @@
 # OpenLogi configuration example. Copy only the sections you need.
-schema_version = 11
+schema_version = 12
 selected_device = "receiver:aabbccdd:slot:1"
 
 [app_settings]
@@ -192,3 +192,26 @@ name = "Google Chrome"
 macos = "com.google.Chrome"
 linux = ["google-chrome", "Google-chrome"]
 windows = "exe:chrome.exe"
+
+# Craft Crown functions. Replace this example key with the Craft's physical key.
+[devices."unit:1234cafe".crown.default]
+enabled = true
+selection_trigger = "press"
+
+[[devices."unit:1234cafe".crown.default.functions]]
+id = "volume"
+name = "Volume"
+icon = "Volume"
+bindings = { Left = "VolumeDown", Right = "VolumeUp", Press = "MuteVolume" }
+
+[[devices."unit:1234cafe".crown.default.functions]]
+id = "workspaces"
+name = "Workspaces"
+icon = "Monitor"
+bindings = { Left = "PreviousDesktop", Right = "NextDesktop" }
+
+[[devices."unit:1234cafe".crown.default.functions]]
+id = "tabs"
+name = "Tabs"
+icon = "NewTab"
+bindings = { Left = "PrevTab", Right = "NextTab" }

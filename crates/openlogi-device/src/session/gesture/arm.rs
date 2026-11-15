@@ -17,6 +17,7 @@ use tracing::{debug, info, warn};
 use super::CaptureSpec;
 use super::main_wheel::{self, ArmedMainWheel, MainWheelDivert};
 use super::spy::{self, ArmedOnboard};
+use crate::crown::{self, Crown, RatchetMode, ReportingMode as CrownReportingMode};
 use crate::reprog_controls::{self, ReprogControlsV4};
 use crate::session::capture::{ReportingChangeStream, open_device, subscribe_reporting_changes};
 use crate::session::capture_restore::{
@@ -68,6 +69,7 @@ pub(super) struct ArmedControls {
     /// `0x2121` main wheel, present when its movement reports are diverted.
     pub(super) main_wheel: Option<ArmedMainWheel>,
     pub(super) onboard: Option<ArmedOnboard>,
+    pub(super) crown: Option<ArmedCrown>,
 }
 
 /// The thumb wheel a capture session diverted. A device exposes it either
@@ -120,6 +122,11 @@ impl ArmedThumb {
     }
 }
 
+pub(super) struct ArmedCrown {
+    pub(super) crown: Crown,
+    pub(super) ratcheted: bool,
+}
+
 pub(super) struct ArmedThumbwheel {
     pub(super) wheel: Thumbwheel,
     /// Read before diverting: a wheel whose info cannot be read stays native.
@@ -149,14 +156,17 @@ pub(super) struct ArmedGestureThumbwheel {
 }
 
 impl ArmedControls {
+    /// Controls whose normal press edges include wheel-hold button edges.
+    pub(super) fn edge_controls(&self) -> impl Iterator<Item = &(u16, ButtonId)> {
+        self.button_cids.iter().chain(&self.wheel_button_cids)
+    }
+
     /// Every button whose presses this session now reports, each once: the
     /// plain, wheel-hold, and raw-XY button diversions arming actually wrote.
     /// A requested control the device does not expose, or cannot divert, is
     /// absent — its presses still reach the OS.
     pub(super) fn diverted_buttons(&self) -> BTreeSet<ButtonId> {
-        self.button_cids
-            .iter()
-            .chain(&self.wheel_button_cids)
+        self.edge_controls()
             .chain(&self.gesture_button_cids)
             .map(|&(_, button)| button)
             .collect()
@@ -187,6 +197,7 @@ impl ArmedControls {
             thumb,
             main_wheel,
             onboard,
+            crown,
             ..
         } = self;
         let reprog =
@@ -200,6 +211,7 @@ impl ArmedControls {
                 .map(|wheel| HiResWheelRestore::new(wheel.feature_index, wheel.restore_resolution)),
             onboard.as_ref().and_then(ArmedOnboard::restore),
             None,
+            crown.as_ref().map(|crown| crown.crown.feature_index()),
         )
     }
 
@@ -223,6 +235,14 @@ impl ArmedControls {
             && let Err(error) = thumb.divert().await
         {
             warn!(?error, "thumb-wheel re-divert after wake failed");
+        }
+        if let Some(crown) = self.crown.as_ref()
+            && let Err(error) = crown
+                .crown
+                .set_reporting(CrownReportingMode::Diverted)
+                .await
+        {
+            warn!(?error, "crown re-divert after wake failed");
         }
         if let Some(wheel) = self.main_wheel.as_ref()
             && let Err(error) = wheel.divert().await
@@ -268,6 +288,7 @@ pub(super) async fn arm_controls(
         && armed.thumb.is_none()
         && armed.main_wheel.is_none()
         && armed.onboard.is_none()
+        && armed.crown.is_none()
     {
         debug!(slot, "no capturable controls — idle session");
     }
@@ -377,6 +398,9 @@ pub(super) async fn arm_controls_into(
         && let Some(info) = device.root().get_feature(HiResWheelFeature::ID).await?
     {
         arm_main_wheel(chan, slot, info.index, requested, armed).await?;
+    }
+    if spec.capture_crown {
+        arm_crown(device, chan, slot, armed).await?;
     }
     if let Some(target) = &spec.onboard {
         spy::arm_onboard(device, chan, slot, target, &mut armed.onboard).await?;
@@ -599,4 +623,28 @@ pub(crate) async fn enumerate_controls(
         controls.push(rc.get_ctrl_id_info(index).await?);
     }
     Ok(controls)
+}
+
+/// Own Crown reporting before its first diversion write, so a failed write
+/// still leaves the session responsible for returning the control to native.
+async fn arm_crown(
+    device: &Device,
+    channel: &Arc<HidppChannel>,
+    device_index: u8,
+    armed: &mut ArmedControls,
+) -> Result<(), CaptureError> {
+    let Some(info) = device.root().get_feature(crown::FEATURE_ID).await? else {
+        return Ok(());
+    };
+    let crown = Crown::new(Arc::clone(channel), device_index, info.index);
+    let mode = crown.get_mode().await?;
+    let crown = armed.crown.insert(ArmedCrown {
+        crown,
+        ratcheted: mode.ratchet_mode == RatchetMode::Ratchet,
+    });
+    crown
+        .crown
+        .set_reporting(CrownReportingMode::Diverted)
+        .await?;
+    Ok(())
 }

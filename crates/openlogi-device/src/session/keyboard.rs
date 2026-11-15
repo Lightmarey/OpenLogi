@@ -924,7 +924,7 @@ impl ArmedCapture for ArmedKeys {
             .controls
             .as_ref()
             .and_then(|controls| ReprogRestore::new(controls.feature_index(), self.reporting));
-        PendingCaptureRestore::new(retired, reprog, None, None, None, g_keys)
+        PendingCaptureRestore::new(retired, reprog, None, None, None, g_keys, None)
     }
 }
 

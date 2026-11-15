@@ -247,6 +247,9 @@ pub struct Capabilities {
     /// identity.
     #[serde(default)]
     pub change_host: bool,
+    /// Craft rotary crown — HID++ `0x4600`. Appended for the IPC contract.
+    #[serde(default)]
+    pub crown: bool,
 }
 
 impl Capabilities {
@@ -307,6 +310,7 @@ impl Capabilities {
             m_keys: ids.contains(&0x8020),
             macro_record: ids.contains(&0x8030),
             change_host: ids.contains(&0x1814),
+            crown: ids.contains(&0x4600),
         }
     }
 
@@ -937,6 +941,7 @@ mod tests {
                     m_keys: false,
                     macro_record: false,
                     change_host: false,
+                    crown: false,
                 }),
                 settings_revision: 0,
                 hidpp10: false,
@@ -1034,6 +1039,8 @@ mod tests {
     #[test]
     fn capabilities_track_the_driving_feature_ids() {
         use super::Capabilities;
+        assert!(Capabilities::from_feature_ids(&[0x4600]).crown);
+        assert!(!Capabilities::from_feature_ids(&[0x1b04, 0x2150]).crown);
         // A typical MX mouse: ReprogControls (0x1b04) + ExtendedAdjustableDpi
         // (0x2202), no lighting.
         let mouse =
@@ -1066,6 +1073,7 @@ mod tests {
                 m_keys: false,
                 macro_record: false,
                 change_host: false,
+                crown: false,
             }
         );
         assert!(!Capabilities::from_feature_ids(&[0x0003, 0x1b04]).thumbwheel);
@@ -1099,6 +1107,7 @@ mod tests {
                 m_keys: false,
                 macro_record: false,
                 change_host: false,
+                crown: false,
             }
         );
         // A G713: the gaming-key features and onboard profiles, no

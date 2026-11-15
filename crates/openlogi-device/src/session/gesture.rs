@@ -25,6 +25,7 @@
 
 mod accum;
 mod arm;
+mod crown;
 pub(super) mod main_wheel;
 mod spy;
 
@@ -45,6 +46,7 @@ use super::capture::{ArmedCapture, Liveness, ReportingChangeStream, run_capture}
 use accum::CaptureAccum;
 pub(crate) use arm::enumerate_controls;
 use arm::{ArmedControls, ArmedThumb, ArmedThumbwheel, arm_controls};
+use crown::CrownAccum;
 pub use main_wheel::MainWheelDivert;
 pub(crate) use spy::SpyRestore;
 use spy::{ArmedOnboard, SpyEdges};
@@ -124,6 +126,17 @@ pub enum CapturedInput {
     /// onboard mode, which loads the stored profile's DPI, so the agent
     /// writes the saved one again.
     HostModeEntered,
+    /// One firmware-recognized clean touch tap, distinct from button press.
+    /// Function selection policy belongs to the agent, not this capture layer.
+    CrownTap,
+    /// Raw signed Crown movement before discrete action pulses are expanded.
+    /// Preserves movement between ratchets without treating it as a discrete pulse.
+    CrownRotation {
+        /// Fine relative slot count.
+        slots: i8,
+        /// Relative ratchet count, measuring the same movement.
+        ratchets: i8,
+    },
 }
 
 /// HID++-divertable standard buttons: the `0x1b04` control ID and the
@@ -182,6 +195,8 @@ pub struct CaptureSpec {
     /// Divert the thumb wheel over `0x2150`, or Gestures2 gesture 46 on a
     /// device without it (rotation rebind / sensitivity / click bound).
     pub capture_thumbwheel: bool,
+    /// Divert a Craft crown over `0x4600` only while a crown input is bound.
+    pub capture_crown: bool,
     /// Gesture-source CIDs ([`GESTURE_SOURCE_BUTTONS`] members) to divert
     /// with raw-XY — one per source in gesture mode; empty when no HID++
     /// control gestures. A control without raw XY is diverted plainly and
@@ -260,6 +275,7 @@ struct GestureCapture {
     /// Behind a `Mutex` for the same reason as `accum`.
     thumb_status: Arc<Mutex<RotationStatus>>,
     spy_edges: Arc<Mutex<SpyEdges>>,
+    crown_accum: Arc<Mutex<CrownAccum>>,
 }
 
 impl GestureCapture {
@@ -269,6 +285,7 @@ impl GestureCapture {
             accum: Arc::default(),
             thumb_status: Arc::new(Mutex::new(RotationStatus::Inactive)),
             spy_edges: Arc::default(),
+            crown_accum: Arc::default(),
         }
     }
 }
@@ -293,6 +310,7 @@ impl ArmedCapture for GestureCapture {
                 .onboard
                 .as_ref()
                 .map_or(0, ArmedOnboard::captured_count),
+            crown = armed.crown.is_some(),
             wake_rearm,
             "control capture active"
         );
@@ -317,12 +335,7 @@ impl ArmedCapture for GestureCapture {
         let dpi_set = armed.dpi_cids.clone();
         // A wheel-hold button's press and release are ordinary button edges;
         // only the raw wheel it unlocks needs its own attribution.
-        let button_set: Vec<(u16, ButtonId)> = armed
-            .button_cids
-            .iter()
-            .chain(&armed.wheel_button_cids)
-            .copied()
-            .collect();
+        let button_set: Vec<(u16, ButtonId)> = armed.edge_controls().copied().collect();
         let wheel_set = armed.wheel_button_cids.clone();
         let hires_per_notch = armed.hires_per_notch;
         let main_wheel = armed
@@ -335,6 +348,12 @@ impl ArmedCapture for GestureCapture {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .attach(sink.clone());
+        let crown = crown::report_handler(
+            armed.crown.as_ref(),
+            Arc::clone(&self.crown_accum),
+            device_index,
+            sink.clone(),
+        );
         move |msg| {
             if let Some((spy_index, captured)) = &spy
                 && let Some(mask) = spy::decode_mask(msg, device_index, *spy_index)
@@ -405,6 +424,7 @@ impl ArmedCapture for GestureCapture {
                     let _ = sink.send(input);
                 }
             }
+            crown(msg);
         }
     }
 
@@ -420,6 +440,10 @@ impl ArmedCapture for GestureCapture {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .interrupt();
+        *self
+            .crown_accum
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = CrownAccum::default();
     }
 
     async fn rearm(&self) -> bool {

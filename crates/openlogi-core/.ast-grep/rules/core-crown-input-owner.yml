@@ -1,0 +1,12 @@
+# Owner: openlogi_core::crown::has_press_edges and validate_input_binding.
+# The editor and config model must agree about threshold and held-output inputs.
+id: core-crown-input-owner
+language: rust
+severity: error
+message: Use openlogi_core::crown::has_press_edges or validate_input_binding for Crown input lifecycles.
+files:
+  - crates/openlogi-desktop/**/*.rs
+rule:
+  any:
+    - pattern: matches!($INPUT, ButtonId::CrownTouch | ButtonId::CrownPress)
+    - pattern: matches!($INPUT, ButtonId::CrownPress | ButtonId::CrownTouch)

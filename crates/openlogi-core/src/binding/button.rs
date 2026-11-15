@@ -100,8 +100,8 @@ pub enum ButtonId {
     /// over HID++ while bound (the OS hook never sees these keys); left on its
     /// native firmware function otherwise.
     ///
-    /// Declared last so the derived ordering keeps every mouse button ahead of
-    /// the keys; among keys the order is by control ID, so a GUI that wants
+    /// Declared after mouse controls so their derived ordering stays stable;
+    /// among keys the order is by control ID, so a GUI that wants
     /// physical F-row order sorts by catalog position instead.
     Control(Cid),
     /// A key of a G-series keyboard's G-key column (HID++ `0x8010`), on one
@@ -117,6 +117,18 @@ pub enum ButtonId {
     /// (HID++ `0x8020`) or MR (`0x8030`). OpenLogi only listens to them; their
     /// bindings run when the cluster is set to nine independent keys.
     ModeKey(ModeKey),
+    /// Contact with the Craft crown's capacitive surface, held until untouch.
+    CrownTouch,
+    /// The Craft crown's physical press, held until release.
+    CrownPress,
+    /// Counterclockwise crown rotation, one pulse per detent (or free-mode slot).
+    CrownLeft,
+    /// Clockwise crown rotation, one pulse per detent (or free-mode slot).
+    CrownRight,
+    /// Counterclockwise rotation while the crown is physically pressed.
+    CrownPressedLeft,
+    /// Clockwise rotation while the crown is physically pressed.
+    CrownPressedRight,
 }
 
 impl ButtonId {
@@ -142,6 +154,17 @@ impl ButtonId {
 
     /// G-series buttons, kept out of [`Self::ALL`].
     pub const G_BUTTONS: [ButtonId; 4] = [ButtonId::G6, ButtonId::G7, ButtonId::G8, ButtonId::G9];
+
+    /// The crown's assignable inputs. These seed no mouse defaults: the crown
+    /// remains native until at least one input is explicitly bound.
+    pub const CROWN: [ButtonId; 6] = [
+        Self::CrownTouch,
+        Self::CrownPress,
+        Self::CrownLeft,
+        Self::CrownRight,
+        Self::CrownPressedLeft,
+        Self::CrownPressedRight,
+    ];
 
     /// The keyboard key bound to `0x1b04` control `cid`.
     #[must_use]
@@ -258,7 +281,7 @@ impl ButtonId {
     /// string form read this one table; `unit_name` is a match without a
     /// wildcard over the unit variants, so a new variant that is missing here
     /// fails to compile rather than failing to parse.
-    const UNIT_NAMES: [(ButtonId, &'static str); 17] = [
+    const UNIT_NAMES: [(ButtonId, &'static str); 23] = [
         (ButtonId::LeftClick, "LeftClick"),
         (ButtonId::RightClick, "RightClick"),
         (ButtonId::MiddleClick, "MiddleClick"),
@@ -276,6 +299,12 @@ impl ButtonId {
         (ButtonId::G7, "G7"),
         (ButtonId::G8, "G8"),
         (ButtonId::G9, "G9"),
+        (ButtonId::CrownTouch, "CrownTouch"),
+        (ButtonId::CrownPress, "CrownPress"),
+        (ButtonId::CrownLeft, "CrownLeft"),
+        (ButtonId::CrownRight, "CrownRight"),
+        (ButtonId::CrownPressedLeft, "CrownPressedLeft"),
+        (ButtonId::CrownPressedRight, "CrownPressedRight"),
     ];
 
     /// The name a mouse button is persisted under. Keyboard controls have no
@@ -306,6 +335,12 @@ impl ButtonId {
             ButtonId::Grid(_) | ButtonId::Control(_) | ButtonId::GKey(_) | ButtonId::ModeKey(_) => {
                 return None;
             }
+            ButtonId::CrownTouch => Self::UNIT_NAMES[17].1,
+            ButtonId::CrownPress => Self::UNIT_NAMES[18].1,
+            ButtonId::CrownLeft => Self::UNIT_NAMES[19].1,
+            ButtonId::CrownRight => Self::UNIT_NAMES[20].1,
+            ButtonId::CrownPressedLeft => Self::UNIT_NAMES[21].1,
+            ButtonId::CrownPressedRight => Self::UNIT_NAMES[22].1,
         })
     }
 
@@ -346,6 +381,12 @@ impl ButtonId {
             ButtonId::Control(cid) => return cid.label(),
             ButtonId::GKey(slot) => return slot.label(),
             ButtonId::ModeKey(key) => key.label(),
+            ButtonId::CrownTouch => "Crown Touch",
+            ButtonId::CrownPress => "Crown Press",
+            ButtonId::CrownLeft => "Crown Left",
+            ButtonId::CrownRight => "Crown Right",
+            ButtonId::CrownPressedLeft => "Crown Press + Left",
+            ButtonId::CrownPressedRight => "Crown Press + Right",
         })
     }
 
@@ -377,6 +418,12 @@ impl ButtonId {
             // Like a grid key's page, the profile is shown beside the key.
             ButtonId::GKey(slot) => slot.key.translation_key(),
             ButtonId::ModeKey(key) => key.translation_key(),
+            ButtonId::CrownTouch => "keyboard.crown_touch",
+            ButtonId::CrownPress => "keyboard.crown_press",
+            ButtonId::CrownLeft => "keyboard.crown_left",
+            ButtonId::CrownRight => "keyboard.crown_right",
+            ButtonId::CrownPressedLeft => "keyboard.crown_pressed_left",
+            ButtonId::CrownPressedRight => "keyboard.crown_pressed_right",
         }
     }
 }
@@ -709,5 +756,21 @@ impl<'de> Deserialize<'de> for ButtonId {
         String::deserialize(deserializer)?
             .parse()
             .map_err(de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crown_names_roundtrip_without_becoming_mouse_or_keyboard_cids() {
+        for button in ButtonId::CROWN {
+            assert_eq!(button.config_name().parse::<ButtonId>(), Ok(button));
+            assert!(!ButtonId::ALL.contains(&button));
+            assert_eq!(button.cid(), None);
+            assert!(!button.supports_gesture_mode());
+            assert!(!button.is_os_hook_button());
+        }
     }
 }
