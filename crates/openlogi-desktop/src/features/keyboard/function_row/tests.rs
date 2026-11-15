@@ -997,6 +997,7 @@ impl Render for OverviewOf {
             INSPECTOR_H,
             &self.keys,
             &pal,
+            None,
         );
         InspectorRow::new(
             div().into_any_element(),

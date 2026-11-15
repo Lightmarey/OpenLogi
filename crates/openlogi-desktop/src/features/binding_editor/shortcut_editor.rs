@@ -52,6 +52,16 @@ impl ShortcutMode {
             Self::Hold => Action::HoldShortcut(combo),
         }
     }
+
+    /// The chord and mode of a bound custom shortcut, or `None` for any other
+    /// action.
+    pub(crate) fn of(action: &Action) -> Option<(&KeyCombo, Self)> {
+        match action {
+            Action::CustomShortcut(combo) => Some((combo, Self::Tap)),
+            Action::HoldShortcut(combo) => Some((combo, Self::Hold)),
+            _ => None,
+        }
+    }
 }
 
 /// The custom shortcut editor's draft: the chord field, the chosen mode, the
@@ -59,6 +69,7 @@ impl ShortcutMode {
 pub(crate) struct ShortcutDraft {
     input: Entity<InputState>,
     mode: ShortcutMode,
+    hold_allowed: bool,
     error: Option<ShortcutError>,
     /// The recording in progress, if any. Dropping it stops recording.
     recorder: Option<ShortcutRecorder>,
@@ -91,6 +102,7 @@ impl ShortcutDraft {
         Self {
             input,
             mode: ShortcutMode::Tap,
+            hold_allowed: true,
             error: None,
             recorder: None,
             record_focus: cx.focus_handle(),
@@ -126,12 +138,38 @@ impl ShortcutDraft {
 
     /// Commit the chord in `mode` from now on.
     pub(crate) fn set_mode(&mut self, mode: ShortcutMode) {
-        self.mode = mode;
+        if self.hold_allowed || mode == ShortcutMode::Tap {
+            self.mode = mode;
+        }
+    }
+
+    /// Restrict pulse inputs to tapped output, including after draft reuse.
+    pub(crate) fn set_hold_allowed(&mut self, allowed: bool) {
+        self.hold_allowed = allowed;
+        if !allowed {
+            self.mode = ShortcutMode::Tap;
+        }
     }
 
     /// Re-stamp the field's placeholder after a language switch.
     pub(crate) fn localize(&self, window: &mut Window, cx: &mut App) {
         crate::ui::components::localize_placeholder(&self.input, Self::placeholder(), window, cx);
+    }
+
+    /// Fill the draft from `bound`: the chord and mode of a bound custom
+    /// shortcut, or an empty Tap draft for anything else. Clears the error
+    /// and stops a recording.
+    pub(crate) fn reset(&mut self, bound: Option<&Action>, window: &mut Window, cx: &mut App) {
+        let (text, mode) = bound
+            .and_then(ShortcutMode::of)
+            .map_or((String::new(), ShortcutMode::Tap), |(combo, mode)| {
+                (combo.rendered_label(), mode)
+            });
+        self.input
+            .update(cx, |input, cx| input.set_value(text, window, cx));
+        self.mode = mode;
+        self.error = None;
+        self.recorder = None;
     }
 
     /// Start recording, or stop the recording in progress.
@@ -197,7 +235,12 @@ pub(crate) fn shortcut_editor<V: EditsShortcut>(
     v_flex()
         .gap_1()
         .child(editor_section(tr!("action_ring.custom_shortcut"), pal))
-        .child(h_flex().gap_2().child(tap_button).child(hold_button))
+        .child(
+            h_flex()
+                .gap_2()
+                .child(tap_button)
+                .when(draft.hold_allowed, |row| row.child(hold_button)),
+        )
         .child(
             h_flex()
                 .gap_2()

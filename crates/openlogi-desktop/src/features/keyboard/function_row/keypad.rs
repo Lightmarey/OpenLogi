@@ -364,8 +364,8 @@ impl RenderOnce for PhotoKey {
                 let next = (*hovered).then_some(idx);
                 view_hover.update(cx, |v, vcx| v.set_hovered_key(next, vcx));
             })
-            .on_click(move |_ev, _window, cx| {
-                view_click.update(cx, |v, vcx| v.click_key(idx, vcx));
+            .on_click(move |_ev, window, cx| {
+                view_click.update(cx, |v, vcx| v.click_key(idx, window, vcx));
             })
     }
 }
@@ -524,8 +524,8 @@ impl RenderOnce for KeyCap {
                 let next = (*hovered).then_some(idx);
                 view_hover.update(cx, |v, vcx| v.set_hovered_key(next, vcx));
             })
-            .on_click(move |_ev, _window, cx| {
-                view_click.update(cx, |v, vcx| v.click_key(idx, vcx));
+            .on_click(move |_ev, window, cx| {
+                view_click.update(cx, |v, vcx| v.click_key(idx, window, vcx));
             })
     }
 }

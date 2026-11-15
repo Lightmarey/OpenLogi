@@ -6129,6 +6129,7 @@ dependencies = [
  "derive_more",
  "disclaim",
  "embed-resource",
+ "fastrand",
  "gpui-kit",
  "gpui-tcc",
  "gpui-updater-pre",

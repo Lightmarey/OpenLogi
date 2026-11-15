@@ -50,6 +50,7 @@ mod asset_targets;
 mod backlight;
 mod bindings;
 mod camera;
+pub(crate) mod crown;
 pub(crate) mod device_list;
 mod device_names;
 mod dpi;

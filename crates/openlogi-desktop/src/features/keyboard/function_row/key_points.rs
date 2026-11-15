@@ -64,6 +64,28 @@ pub(super) struct KeyPoint {
     pub(super) y_frac: f32,
 }
 
+/// The existing Craft Crown press marker, calibrated against its front render.
+/// Logi places its label-only Crown assignments beside the dial. On the cached
+/// front.png, moving the press marker by (-4.8%, +1.5%) puts the hit target at
+/// the visible dial centre (about 60, 62 on the 1872 x 654 image). Other depots
+/// and missing Crown metadata get a callout only, never an invented hotspot.
+pub(super) fn crown_point(asset: Option<&ResolvedAsset>) -> Option<KeyPoint> {
+    let asset = asset.filter(|asset| asset.depot == "craft")?;
+    let marker = asset
+        .metadata
+        .images
+        .iter()
+        .find(|image| image.key == "device_crown_image")?
+        .assignments
+        .iter()
+        .find(|assignment| assignment.slot_name == "SLOT_NAME_PRESS")?
+        .marker;
+    Some(KeyPoint {
+        x_frac: (marker.x / 100.0 - 0.048).clamp(0.0, 1.0),
+        y_frac: (marker.y / 100.0 + 0.015).clamp(0.0, 1.0),
+    })
+}
+
 /// What a key on the Keys tab binds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum KeyTarget {

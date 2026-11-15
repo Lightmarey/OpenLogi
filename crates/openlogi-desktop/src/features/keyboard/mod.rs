@@ -12,6 +12,7 @@
 //! [`AppState::commit_binding`]: crate::state::AppState::commit_binding
 //! [`AppState::commit_keyboard_binding`]: crate::state::AppState::commit_keyboard_binding
 
+mod crown;
 pub mod disable_keys;
 pub mod editors;
 pub mod function_row;

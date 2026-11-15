@@ -235,6 +235,95 @@ impl AppState {
             .and(self.set_editing_action_ring_app(Some(ring)))
     }
 
+    /// Device and canonical application scope edited by the Crown panel.
+    pub(crate) fn crown_editing_context(&self) -> Option<(String, Option<String>)> {
+        let record = self.current_record()?;
+        if !record.capabilities.is_some_and(|caps| caps.crown) {
+            return None;
+        }
+        let key = record.persistent_config_key()?;
+        let app = self.editing_app().map(|app| {
+            self.config
+                .devices
+                .get(key)
+                .and_then(|device| device.crown.resolve(&self.config.apps, Some(app)).0)
+                .unwrap_or(app)
+                .to_owned()
+        });
+        Some((key.to_owned(), app))
+    }
+
+    /// Effective function profile, including an inherited device default.
+    pub(crate) fn crown_profile(&self) -> openlogi_core::crown::CrownProfile {
+        self.crown_editing_context()
+            .and_then(|(key, app)| {
+                self.config.devices.get(&key).map(|device| {
+                    device
+                        .crown
+                        .resolve(&self.config.apps, app.as_deref())
+                        .1
+                        .clone()
+                })
+            })
+            .unwrap_or_default()
+    }
+
+    /// Persist a validated profile while its original device and app remain open.
+    pub(crate) fn commit_crown_profile(
+        &mut self,
+        context: &(String, Option<String>),
+        profile: openlogi_core::crown::CrownProfile,
+    ) -> StateEvents {
+        if self.crown_editing_context().as_ref() != Some(context) {
+            return StateEvents::none();
+        }
+        let (key, app) = context;
+        self.config.edit(|config| {
+            let device = config.devices.entry(key.clone()).or_default();
+            if let Some(app) = app {
+                device.crown.per_app.insert(app.clone(), profile);
+            } else {
+                device.crown.default = profile;
+            }
+        });
+        self.persist_and_reload("Crown profile");
+        self.for_current_device(StateEvent::BindingsChanged)
+    }
+
+    /// Full direct-input binding, retaining threshold actions during editing.
+    pub(crate) fn crown_input_binding(&self, button: ButtonId) -> Binding {
+        let key = self
+            .current_record()
+            .and_then(DeviceRecord::persistent_config_key);
+        openlogi_core::bindings::button_bindings_for(&self.config, key, self.editing_app(), None)
+            .remove(&button)
+            .unwrap_or_else(|| openlogi_core::binding::default_binding(button).into())
+    }
+
+    /// Save a direct Crown binding through the existing atomic config owner.
+    pub(crate) fn commit_crown_input(
+        &mut self,
+        context: &(String, Option<String>),
+        button: ButtonId,
+        binding: Binding,
+    ) -> StateEvents {
+        if self.crown_editing_context().as_ref() != Some(context)
+            || !ButtonId::CROWN.contains(&button)
+            || openlogi_core::crown::validate_input_binding(button, &binding).is_err()
+            || (context.1.is_some() && !matches!(binding, Binding::Single(_)))
+        {
+            return StateEvents::none();
+        }
+        let (key, app) = context;
+        self.config.edit(|config| match app {
+            Some(app) => config.set_per_app_binding(key, app, button, Some(binding.click_action())),
+            None => config.set_binding(key, button, binding),
+        });
+        self.refresh_binding_projections();
+        self.persist_and_reload("Crown input");
+        self.for_current_device(StateEvent::BindingsChanged)
+    }
+
     /// Which bindings the mouse editor edits.
     #[must_use]
     pub fn binding_layer(&self) -> BindingLayer {
@@ -495,8 +584,8 @@ impl AppState {
         StateEvent::BindingsChanged(key.clone()).into()
     }
 
-    /// Delete both per-app configuration sections in one save/reload. A failed
-    /// save restores both sections and leaves both editor selections intact.
+    /// Delete application bindings, Crown functions and the ring in one save.
+    /// A failed save restores the persisted configuration and editor selections.
     pub fn remove_all_app_profiles(&mut self, key: &DeviceKey, app: &str) -> StateEvents {
         let changed = self.config.edit(|config| {
             let Some(device) = config.devices.get_mut(key.as_str()) else {
@@ -504,13 +593,14 @@ impl AppState {
             };
             let buttons = device.per_app_bindings.remove(app).is_some();
             let ring = device.action_ring.per_app.remove(app).is_some();
-            buttons || ring
+            let crown = device.crown.per_app.remove(app).is_some();
+            buttons || ring || crown
         });
         if changed && !self.persist_and_reload("all application profiles") {
             return StateEvent::BindingsChanged(key.clone()).into();
         }
 
-        // Both saved sections are gone, so the scoped removals only close their
+        // All saved sections are gone, so the scoped removals only close their
         // matching editors; neither writes or reloads an already absent profile.
         let events = self.remove_app_profile(key, app);
         let _ = self.remove_action_ring_profile(key, app);

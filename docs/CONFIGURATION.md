@@ -692,7 +692,8 @@ Top = { action = { CustomShortcut = "Cmd+Shift+P" }, icon = "Keyboard", label = 
 
 ## Craft Crown
 
-On a Craft keyboard, open **Keys → Crown…**. Direct mode exposes touch, press,
+On a Craft keyboard, open **Keys** and select **Crown** on the keyboard image or
+in the key list. Direct mode exposes touch, press,
 left/right rotation and left/right rotation while pressed. Touch and press retain
 real down/up edges for short presses, long presses and held shortcuts. Rotation
 accepts a single tapped action. Direct application overrides follow the existing
@@ -718,7 +719,7 @@ create an override. A disabled application profile uses its direct input binding
 The [complete example](config.example.toml) contains all three starter functions.
 
 The agent publishes a read-only HUD while the Crown is touched or pressed and for
-800 ms after release. On GNOME Wayland, install the bundled
+800 ms after release. On GNOME, install the bundled
 [Crown HUD extension](../crates/openlogi-overlay/gnome-shell-extension/README.md).
 It provides Logitech, GNOME and OpenLogi skins, live light/dark themes, bottom
 spacing and authoritative output-volume feedback, including mute and output-device

@@ -155,7 +155,7 @@ impl DetailTab {
         // the Buttons panel, not both.
         let shows_keys_tab = record.kind.is_keyboard_family()
             && !caps.pointer
-            && (caps.buttons || record.asset.is_some());
+            && (caps.buttons || caps.crown || record.asset.is_some());
         // Keys goes first for a keyboard: it's the main screen for that device
         // (and `default_for` picks the first tab), so adding the ring editor
         // below must not reassign a keyboard's opening tab away from it.
@@ -208,9 +208,10 @@ impl DetailTab {
     fn edits_app_profiles(self, state: &AppState) -> bool {
         match self {
             Self::Buttons | Self::ActionsRing => true,
-            // A keypad's keys all bind per app profile; a keyboard's F-row
-            // binds globally, and a profile selector there would mislead.
-            Self::Keys => state.current_keypad().is_some(),
+            // Keypads and Crown inputs use the device's application scope.
+            Self::Keys => {
+                state.current_keypad().is_some() || state.crown_editing_context().is_some()
+            }
             Self::Pointer
             | Self::Lighting
             | Self::Camera

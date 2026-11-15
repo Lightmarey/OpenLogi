@@ -194,6 +194,8 @@ pub struct FunctionRowView {
     inspector_room: Option<f32>,
     overview_h: Option<f32>,
     overview_scroll: ScrollHandle,
+    crown_editor: Option<Entity<super::crown::CrownEditor>>,
+    crown_index: Option<usize>,
     _state_obs: Subscription,
 }
 
@@ -226,6 +228,8 @@ impl FunctionRowView {
             inspector_room: None,
             overview_h: None,
             overview_scroll: ScrollHandle::new(),
+            crown_editor: None,
+            crown_index: None,
             _state_obs: state_obs,
         }
     }
@@ -234,6 +238,7 @@ impl FunctionRowView {
     pub(crate) fn select_key(&mut self, idx: Option<usize>, cx: &mut Context<Self>) {
         // Changing selection also drops any open editor + its drafts.
         if self.selected_key != idx {
+            self.crown_editor = None;
             self.drop_editor();
         }
         self.selected_key = idx;
@@ -260,8 +265,18 @@ impl FunctionRowView {
 
     /// Toggle a key selection from a click on either its callout or key hit
     /// target.
-    pub(crate) fn click_key(&mut self, idx: usize, cx: &mut Context<Self>) {
+    pub(crate) fn click_key(&mut self, idx: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.select_key(next_selection_after_click(self.selected_key, idx), cx);
+        if self.selected_key == self.crown_index && self.crown_index.is_some() {
+            self.open_crown(window, cx);
+        }
+    }
+
+    fn open_crown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.active_editor = None;
+        self.selected_key = self.crown_index;
+        self.crown_editor = Some(cx.new(|cx| super::crown::CrownEditor::new(window, cx)));
+        cx.notify();
     }
 
     pub(crate) fn set_hovered_key(&mut self, idx: Option<usize>, cx: &mut Context<Self>) {
@@ -300,6 +315,25 @@ impl FunctionRowView {
         let room = self
             .inspector_room
             .map_or(INSPECTOR_H, |room| room.max(INSPECTOR_MIN_H));
+        if let Some(editor) = &self.crown_editor {
+            return (
+                Inspector::Panel(div().size_full().child(editor.clone())),
+                room,
+            );
+        }
+        let crown_view = view.clone();
+        let crown = (self.crown_index.is_none()
+            && AppState::try_read(cx)
+                .and_then(AppState::crown_editing_context)
+                .is_some())
+        .then(|| {
+            control_button("craft-crown")
+                .debug_selector(|| "craft-crown".into())
+                .label("Crown…")
+                .on_click(move |_, window, cx| {
+                    crown_view.update(cx, |view, cx| view.open_crown(window, cx));
+                })
+        });
         let inspector = match selected {
             Some(selected) => Inspector::Panel(self.config_panel(selected, slots, view, cx)),
             None => Inspector::Overview(key_overview(
@@ -309,6 +343,7 @@ impl FunctionRowView {
                 room,
                 view,
                 pal,
+                crown,
             )),
         };
         (inspector, inspector_height(self.overview_h, room))
@@ -328,6 +363,7 @@ impl FunctionRowView {
         };
         if self.edit_scope != scope {
             if self.edit_scope.device != scope.device {
+                self.crown_editor = None;
                 self.move_keypad_page(KeypadPage::FIRST);
                 self.g_profile = GKeyProfile::M1;
             }
@@ -357,10 +393,21 @@ impl FunctionRowView {
     /// profile the edited one first.
     fn edited_slots(
         &mut self,
-        layouts: Vec<KeySlotLayout>,
+        mut layouts: Vec<KeySlotLayout>,
         state: Option<&AppState>,
         gaming: Option<GamingKeys>,
     ) -> Vec<KeySlot> {
+        let has_crown = state.and_then(AppState::crown_editing_context).is_some();
+        let asset = state.and_then(|state| state.current_record()?.asset.as_ref());
+        self.crown_index = None;
+        if has_crown && let Some(point) = key_points::crown_point(asset) {
+            self.crown_index = Some(layouts.len());
+            layouts.push(KeySlotLayout {
+                target: KeyTarget::Control(ButtonId::CrownPress),
+                legend: "Crown".into(),
+                point,
+            });
+        }
         let gaming_mode = gaming.map_or_else(GamingKeyMode::default, |gaming| gaming.mode);
         if gaming_mode != self.gaming_mode {
             self.gaming_mode = gaming_mode;
@@ -533,6 +580,7 @@ impl Render for FunctionRowView {
         // A stale selection can outlive a device switch to a shorter F-row;
         // drop it instead of indexing past the new slot list.
         if self.selected_key.is_some_and(|idx| idx >= slots.len()) {
+            self.crown_editor = None;
             self.selected_key = None;
             self.drop_editor();
         }
@@ -834,6 +882,21 @@ fn key_slots_from_layouts(
                     target: layout.target,
                 };
             }
+            if layout.target == KeyTarget::Control(ButtonId::CrownPress)
+                && state.is_some_and(|state| state.crown_profile().is_enabled())
+            {
+                return KeySlot {
+                    idx,
+                    label: tr!("keyboard.crown"),
+                    target: layout.target,
+                    x_frac: layout.point.x_frac,
+                    y_frac: layout.point.y_frac,
+                    binding: tr!("keyboard.crown_function_mode"),
+                    binding_icon: "action-icons/volume-2.svg",
+                    bound: true,
+                    lcd_icon: None,
+                };
+            }
             let bound = match &layout.target {
                 // The face the keypad shows, which a long press can set
                 // without a press action.
@@ -1011,6 +1074,7 @@ fn key_overview(
     room: f32,
     view: &Entity<FunctionRowView>,
     pal: &Palette,
+    crown: Option<gpui_kit::component::button::Button>,
 ) -> gpui::Div {
     let rows = slots
         .iter()
@@ -1022,6 +1086,7 @@ fn key_overview(
         .debug_selector(|| "key-overview".into())
         .max_h(px(room))
         .child(inspector_title(tr!("device.keys"), pal))
+        .children(crown)
         .child(divider(*pal))
         .child(
             v_flex()
@@ -1132,12 +1197,12 @@ fn overview_row(
             let next = (*hovered).then_some(idx);
             view_hover.update(cx, |v, vcx| v.set_hovered_key(next, vcx));
         })
-        .on_click(move |_ev, _window, cx| {
+        .on_click(move |_ev, window, cx| {
             // The key's panel replaces the overview, so this row never
             // sees its hover end.
             view_click.update(cx, |v, vcx| {
                 v.set_hovered_key(None, vcx);
-                v.click_key(idx, vcx);
+                v.click_key(idx, window, vcx);
             });
         })
 }
@@ -1328,8 +1393,8 @@ impl RenderOnce for KeyCallout {
                 let next = (*hovered).then_some(idx);
                 view_hover.update(cx, |v, vcx| v.set_hovered_key(next, vcx));
             })
-            .on_click(move |_ev, _window, cx| {
-                view_click.update(cx, |v, vcx| v.click_key(idx, vcx));
+            .on_click(move |_ev, window, cx| {
+                view_click.update(cx, |v, vcx| v.click_key(idx, window, vcx));
             })
     }
 }
@@ -1389,8 +1454,8 @@ fn key_click_target(
             let next = (*hovered).then_some(idx);
             view_hover.update(cx, |v, vcx| v.set_hovered_key(next, vcx));
         })
-        .on_click(move |_ev, _window, cx| {
-            view_click.update(cx, |v, vcx| v.click_key(idx, vcx));
+        .on_click(move |_ev, window, cx| {
+            view_click.update(cx, |v, vcx| v.click_key(idx, window, vcx));
         })
 }
 

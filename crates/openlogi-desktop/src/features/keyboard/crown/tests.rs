@@ -1,0 +1,160 @@
+use super::*;
+use crate::state::ConfigPersistence;
+use crate::state::tests::crown::{KEY, crown_state};
+use gpui::{TestAppContext, VisualTestContext, px, size};
+use openlogi_core::binding::Action;
+use openlogi_core::config::{Config, ConfigFile};
+
+fn editor(
+    cx: &mut TestAppContext,
+) -> (
+    Entity<CrownEditor>,
+    &mut VisualTestContext,
+    tempfile::TempDir,
+) {
+    cx.update(gpui_kit::init);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(openlogi_core::paths::CONFIG_FILE);
+    let (config, file) = ConfigFile::load_from_path(&path).unwrap();
+    let (state, _commands) = crown_state(config, ConfigPersistence::UserFile(file));
+    cx.update(|cx| {
+        let state = cx.new(|_| state);
+        AppState::set_global(state, cx);
+    });
+    let (view, cx) = cx.add_window_view(CrownEditor::new);
+    cx.simulate_resize(size(px(340.), px(540.)));
+    draw(cx);
+    (view, cx, dir)
+}
+
+fn draw(cx: &mut VisualTestContext) {
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+fn click(cx: &mut VisualTestContext, selector: &'static str) {
+    let bounds = cx
+        .debug_bounds(selector)
+        .expect("Crown control is rendered");
+    assert!(
+        bounds.top() >= px(0.) && bounds.bottom() <= px(540.),
+        "{selector} stays reachable in the narrow inspector: {bounds:?}"
+    );
+    cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    draw(cx);
+}
+
+#[gpui::test]
+fn crown_direct_binding_can_cancel_save_and_reopen_through_its_controls(cx: &mut TestAppContext) {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    let (view, cx, dir) = editor(cx);
+    click(cx, "crown-edit-binding");
+    click(cx, "crown-action-Copy");
+    click(cx, "crown-binding-cancel");
+    cx.read(|cx| {
+        assert_eq!(
+            AppState::try_read(cx)
+                .unwrap()
+                .crown_input_binding(ButtonId::CrownTouch),
+            Binding::Single(Action::None)
+        );
+    });
+    click(cx, "crown-edit-binding");
+    click(cx, "crown-action-Copy");
+    click(cx, "crown-binding-save");
+    let saved =
+        Config::load_from_path(&dir.path().join(openlogi_core::paths::CONFIG_FILE)).unwrap();
+    assert_eq!(
+        saved.stored_bindings(KEY)[&ButtonId::CrownTouch],
+        Binding::Single(Action::Copy)
+    );
+    click(cx, "crown-edit-binding");
+    view.read_with(cx, |view, _| assert!(view.custom.is_some()));
+    assert!(cx.debug_bounds("crown-action-Copy-check").is_some());
+}
+
+#[gpui::test]
+fn crown_function_management_reserves_press_and_retains_stable_selection(cx: &mut TestAppContext) {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    let (view, cx, _dir) = editor(cx);
+    click(cx, "crown-functions-mode");
+    view.read_with(cx, |view, cx| {
+        assert_eq!(view.selected.as_ref().unwrap().as_ref(), "volume");
+        assert_ne!(
+            view.control.read(cx).selected_value(),
+            Some(&ButtonId::CrownPress)
+        );
+        assert!(
+            !AppState::try_read(cx)
+                .unwrap()
+                .crown_profile()
+                .binding_controls()
+                .any(|control| control == CrownControl::Press)
+        );
+    });
+    click(cx, "crown-add");
+    let selected = view.read_with(cx, |view, _| view.selected.clone());
+    click(cx, "crown-move-up");
+    assert_eq!(
+        view.read_with(cx, |view, _| view.selected.clone()),
+        selected
+    );
+    click(cx, "crown-remove");
+    cx.read(|cx| {
+        assert_eq!(
+            AppState::try_read(cx)
+                .unwrap()
+                .crown_profile()
+                .functions()
+                .len(),
+            3
+        );
+    });
+}
+
+#[gpui::test]
+fn crown_binding_callbacks_expire_when_the_device_app_or_draft_changes(cx: &mut TestAppContext) {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    let (view, cx, _dir) = editor(cx);
+    click(cx, "crown-edit-binding");
+    let stale = view.read_with(cx, |view, cx| {
+        view.custom.as_ref().unwrap().read(cx).save.clone()
+    });
+    click(cx, "crown-binding-cancel");
+    click(cx, "crown-edit-binding");
+    cx.update(|_, cx| stale(Binding::Single(Action::Copy), cx));
+    cx.read(|cx| {
+        assert_eq!(
+            AppState::try_read(cx)
+                .unwrap()
+                .crown_input_binding(ButtonId::CrownTouch),
+            Binding::Single(Action::None)
+        );
+    });
+    cx.update(|_, cx| {
+        AppState::apply(cx, |state| {
+            state.set_editing_app(Some("org.example.Editor".into()))
+        });
+    });
+    draw(cx);
+    cx.update(|_, cx| stale(Binding::Single(Action::Copy), cx));
+    cx.read(|cx| {
+        assert_eq!(
+            AppState::try_read(cx)
+                .unwrap()
+                .crown_input_binding(ButtonId::CrownTouch),
+            Binding::Single(Action::None)
+        );
+    });
+    view.read_with(cx, |view, _| assert!(view.custom.is_none()));
+}
+
+#[gpui::test]
+fn craft_crown_direct_controls_keep_the_edit_action_with_its_input(cx: &mut TestAppContext) {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    let (_view, cx, _dir) = editor(cx);
+    let edit = cx.debug_bounds("crown-edit-binding").unwrap();
+    assert!(
+        edit.top() < px(250.),
+        "the input and Edit action stay grouped: {edit:?}"
+    );
+}

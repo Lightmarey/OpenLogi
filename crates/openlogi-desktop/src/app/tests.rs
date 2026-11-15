@@ -2179,3 +2179,24 @@ fn a_gaming_keyboard_gets_no_keys_or_mouse_tabs() {
     assert!(!tabs.contains(&DetailTab::Buttons) && !tabs.contains(&DetailTab::ActionsRing));
     assert!(tabs.contains(&DetailTab::Lighting));
 }
+
+#[test]
+fn craft_crown_capability_exposes_the_keys_workspace() {
+    let keyboard = record(
+        DeviceKind::Keyboard,
+        Some(Capabilities {
+            crown: true,
+            ..Capabilities::default()
+        }),
+    );
+    assert!(DetailTab::tabs_for(&keyboard).contains(&DetailTab::Keys));
+}
+
+#[test]
+fn craft_crown_keys_expose_application_profiles() {
+    let (state, _commands) = crate::state::tests::crown::crown_state(
+        openlogi_core::config::Config::ephemeral(),
+        crate::state::ConfigPersistence::ReadOnly("test".into()),
+    );
+    assert!(DetailTab::Keys.edits_app_profiles(&state));
+}

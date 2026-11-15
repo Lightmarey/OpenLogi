@@ -47,6 +47,52 @@ fn text(view: &Entity<DraftView>, cx: &mut VisualTestContext) -> String {
     })
 }
 
+#[test]
+fn a_bound_shortcut_names_its_chord_and_mode() {
+    let combo = chord("Ctrl+Alt+C");
+    assert_eq!(
+        ShortcutMode::of(&Action::CustomShortcut(combo.clone())),
+        Some((&combo, ShortcutMode::Tap))
+    );
+    assert_eq!(
+        ShortcutMode::of(&Action::HoldShortcut(combo.clone())),
+        Some((&combo, ShortcutMode::Hold))
+    );
+    assert_eq!(ShortcutMode::of(&Action::Copy), None);
+    // The modifiers-only hold is a different editor's action.
+    assert_eq!(
+        ShortcutMode::of(&Action::TapKeyHoldingModifiers(combo)),
+        None
+    );
+}
+
+/// Reopening the editor on a bound shortcut shows its chord in the mode it
+/// was saved in; any other binding starts an empty Tap draft.
+#[gpui::test]
+fn reset_seeds_the_bound_chord_and_mode(cx: &mut TestAppContext) {
+    let (view, cx) = draft_view(cx);
+    let hold = Action::HoldShortcut(chord("Ctrl+Shift+PageUp"));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| view.draft.reset(Some(&hold), window, cx));
+    });
+    assert_eq!(text(&view, cx), "Ctrl+Shift+PageUp");
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.draft.mode(), ShortcutMode::Hold);
+    });
+
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.draft.recorded(Recording::Unsupported, window, cx);
+            view.draft.reset(Some(&Action::Copy), window, cx);
+        });
+    });
+    assert_eq!(text(&view, cx), "");
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.draft.mode(), ShortcutMode::Tap);
+        assert_eq!(view.draft.error(), None);
+    });
+}
+
 /// Add commits the field in the chosen mode; text that is no chord commits
 /// nothing and shows the error. (Typing in the field takes the error back:
 /// the mouse view's picker test types into it.)
