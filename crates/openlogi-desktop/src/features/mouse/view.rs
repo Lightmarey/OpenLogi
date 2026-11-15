@@ -24,12 +24,10 @@ use super::geometry::{
     asset_hotspots_for_png, fallback_hotspots, labels_fit, labels_from_hotspots, side_view_width,
 };
 use super::hotspots::{Hotspot, MOUSE_MODEL_SIZE, MouseControlId};
-use super::inspector::{
-    ActionPickerContext, BindingInspectorData, ShortcutError, binding_inspector,
-};
+use super::inspector::{ActionPickerContext, BindingInspectorData, binding_inspector};
 use super::leader_lines::{Geometry as LeaderGeometry, Label, paint as paint_leader_lines};
 use crate::app::{glow_canvas, keyboard_glow};
-use crate::features::binding_editor::{Recording, RecordsShortcut, ShortcutRecorder};
+use crate::features::binding_editor::{EditsShortcut, Recording, RecordsShortcut, ShortcutDraft};
 use crate::features::keyboard::editors::{PowerUserKind, text_editor_placeholder};
 use crate::features::profiles::{profile_canvas_status, profile_name};
 use crate::services::assets::{GlowGeometry, ResolvedAsset};
@@ -190,11 +188,8 @@ pub struct MouseModelView {
     hovered: Option<MouseControlId>,
     mode: EditorMode,
     action_search: Entity<InputState>,
-    pub(super) custom_shortcut_input: Entity<InputState>,
     pub(super) custom_application_input: Entity<InputState>,
     pub(super) custom_command_input: Entity<InputState>,
-    /// The Record button's area; a recording lasts while focus stays in it.
-    shortcut_record_focus: FocusHandle,
     /// The canvas area as last laid out, which the model and its cards fit
     /// inside. `None` until the first frame measures it.
     canvas_room: Option<Size<Pixels>>,
@@ -208,17 +203,6 @@ impl MouseModelView {
             cx.new(|cx| InputState::new(window, cx).placeholder(tr!("actions.search_actions")));
         cx.subscribe(&action_search, |_, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
-                cx.notify();
-            }
-        })
-        .detach();
-        let custom_shortcut_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder(tr!("action_ring.shortcut_e_g_cmd_plus_shift_plus_p"))
-        });
-        cx.subscribe(&custom_shortcut_input, |view, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                view.edit_picker_drafts(|drafts| drafts.invalid.shortcut = None);
                 cx.notify();
             }
         })
@@ -263,10 +247,8 @@ impl MouseModelView {
             hovered: None,
             mode: EditorMode::Idle,
             action_search,
-            custom_shortcut_input,
             custom_application_input,
             custom_command_input,
-            shortcut_record_focus: cx.focus_handle(),
             canvas_room: None,
             _state_obs: state_obs,
         }
@@ -290,32 +272,19 @@ impl MouseModelView {
     pub(super) fn open_action_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         for input in [
             &self.action_search,
-            &self.custom_shortcut_input,
             &self.custom_application_input,
             &self.custom_command_input,
         ] {
             input.update(cx, |input, cx| input.set_value("", window, cx));
         }
-        self.mode = mem::take(&mut self.mode).open_picker();
+        let shortcut = ShortcutDraft::new(window, cx);
+        self.mode = mem::take(&mut self.mode).open_picker(shortcut);
     }
 
     /// Close the action picker, ending any recording. Callers must
     /// `cx.notify()`.
     pub(super) fn close_action_picker(&mut self) {
         self.mode = mem::take(&mut self.mode).close_picker();
-    }
-
-    /// Start recording the custom shortcut, or stop the recording in
-    /// progress.
-    pub(super) fn toggle_shortcut_recording(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let area = &self.shortcut_record_focus;
-        self.mode = mem::take(&mut self.mode)
-            .toggle_recording(|| ShortcutRecorder::start(area, window, cx));
-        cx.notify();
     }
 
     /// Change the open picker's drafts; nothing while it is closed. Callers
@@ -333,21 +302,14 @@ impl MouseModelView {
 
     /// The action picker's state, as the inspector reads it.
     fn action_picker_context<'a>(&'a self, view: &'a Entity<Self>) -> ActionPickerContext<'a> {
-        let drafts = self.mode.drafts().copied();
-        let PickerDrafts {
-            shortcut_mode,
-            invalid,
-        } = drafts.unwrap_or_default();
+        let drafts = self.mode.drafts();
         ActionPickerContext {
             open: drafts.is_some(),
             search: &self.action_search,
-            shortcut_input: &self.custom_shortcut_input,
+            shortcut: drafts.map(|drafts| &drafts.shortcut),
             application_input: &self.custom_application_input,
             command_input: &self.custom_command_input,
-            shortcut_mode,
-            shortcut_recording: self.mode.is_recording(),
-            shortcut_record_focus: &self.shortcut_record_focus,
-            invalid,
+            invalid: drafts.map(|drafts| drafts.invalid).unwrap_or_default(),
             view,
         }
     }
@@ -437,12 +399,9 @@ impl MouseModelView {
             window,
             cx,
         );
-        crate::ui::components::localize_placeholder(
-            &self.custom_shortcut_input,
-            tr!("action_ring.shortcut_e_g_cmd_plus_shift_plus_p"),
-            window,
-            cx,
-        );
+        if let Some(drafts) = self.mode.drafts() {
+            drafts.shortcut.localize(window, cx);
+        }
         crate::ui::components::localize_placeholder(
             &self.custom_application_input,
             tr!("action_ring.application_folder_path_or_url"),
@@ -472,6 +431,12 @@ impl MouseModelView {
     }
 }
 
+impl EditsShortcut for MouseModelView {
+    fn shortcut_draft(&mut self) -> Option<&mut ShortcutDraft> {
+        self.mode.drafts_mut().map(|drafts| &mut drafts.shortcut)
+    }
+}
+
 impl RecordsShortcut for MouseModelView {
     /// A recorded chord fills the shortcut field, and Add commits it in the
     /// chosen mode. A key the recorder cannot turn into a chord shows the
@@ -482,23 +447,8 @@ impl RecordsShortcut for MouseModelView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.mode = mem::take(&mut self.mode).stop_recording();
-        if let Some(drafts) = self.mode.drafts_mut() {
-            match recording {
-                Recording::Chord(combo) => {
-                    self.custom_shortcut_input.update(cx, |input, cx| {
-                        input.set_value(combo.rendered_label(), window, cx);
-                    });
-                    drafts.invalid.shortcut = None;
-                }
-                Recording::Cancelled => {}
-                Recording::Unsupported => {
-                    drafts.invalid.shortcut = Some(ShortcutError::Unrecognized);
-                }
-                Recording::ShiftedSymbol => {
-                    drafts.invalid.shortcut = Some(ShortcutError::ShiftedSymbol);
-                }
-            }
+        if let Some(draft) = self.shortcut_draft() {
+            draft.recorded(recording, window, cx);
         }
         cx.notify();
     }

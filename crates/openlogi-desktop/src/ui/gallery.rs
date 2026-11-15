@@ -34,6 +34,11 @@ use super::theme::{
     self, ContentWidth, OPENLOGI_DARK, OPENLOGI_LIGHT, Palette, PressableStyle as _,
     SelectableStyle as _, Typography as _,
 };
+use crate::features::binding_editor::{
+    EditsShortcut, PickFn, Recording, RecordsShortcut, ShortcutDraft, shortcut_editor,
+};
+use openlogi_core::binding::Action;
+use std::rc::Rc;
 
 const TITLE: &str = "OpenLogi Component Gallery";
 
@@ -64,7 +69,7 @@ pub(crate) fn run() {
         };
         let opened = cx.open_window(options, |window, cx| {
             theme::apply_scale(window, UiScale::Normal);
-            let view = cx.new(ComponentGallery::new);
+            let view = cx.new(|cx| ComponentGallery::new(window, cx));
             cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
         });
 
@@ -100,6 +105,8 @@ fn install_openlogi_themes(cx: &mut App) {
 }
 
 struct ComponentGallery {
+    shortcut: ShortcutDraft,
+    last_shortcut: Option<Action>,
     mode: ThemeMode,
     scale: UiScale,
     choice_selected: usize,
@@ -123,7 +130,7 @@ struct ComponentGallery {
 const ROW_DEFAULT: u8 = 14;
 
 impl ComponentGallery {
-    fn new(cx: &mut Context<Self>) -> Self {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let slider_committed = 40;
         let slider = CommitSlider::new(
             SliderRange::new(0, 100),
@@ -146,6 +153,8 @@ impl ComponentGallery {
             |this: &mut Self, _, _| this.entry_auto = false,
         );
         Self {
+            shortcut: ShortcutDraft::new(window, cx),
+            last_shortcut: None,
             mode: ThemeMode::Light,
             scale: UiScale::Normal,
             choice_selected: 0,
@@ -695,10 +704,35 @@ impl ComponentGallery {
     }
 }
 
+impl RecordsShortcut for ComponentGallery {
+    fn shortcut_recorded(
+        &mut self,
+        recording: Recording,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.shortcut.recorded(recording, window, cx);
+        cx.notify();
+    }
+}
+
+impl EditsShortcut for ComponentGallery {
+    fn shortcut_draft(&mut self) -> Option<&mut ShortcutDraft> {
+        Some(&mut self.shortcut)
+    }
+}
+
 impl Render for ComponentGallery {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         theme::apply_scale(window, self.scale);
         let pal = theme::palette(cx);
+        let view = cx.entity();
+        let pick: PickFn = Rc::new(move |action, _, cx| {
+            view.update(cx, |view, cx| {
+                view.last_shortcut = Some(action);
+                cx.notify();
+            });
+        });
         v_flex()
             .size_full()
             .bg(pal.page)
@@ -718,7 +752,24 @@ impl Render for ComponentGallery {
                             .max_w(ContentWidth::DoubleExtraLarge.rems())
                             .gap_4()
                             .child(self.controls(pal, cx))
-                            .child(self.carousel(pal, cx)),
+                            .child(self.carousel(pal, cx))
+                            .child(gallery_panel(
+                                "Shortcut editor",
+                                IconName::Settings,
+                                v_flex()
+                                    .gap_2()
+                                    .child(shortcut_editor(
+                                        "gallery-shortcut",
+                                        &self.shortcut,
+                                        &cx.entity(),
+                                        &pick,
+                                        pal,
+                                    ))
+                                    .when_some(self.last_shortcut.as_ref(), |body, action| {
+                                        body.child(div().text_caption().child(action.label()))
+                                    }),
+                                pal,
+                            )),
                     ),
             )
     }
@@ -774,7 +825,7 @@ mod tests {
         cx.update(gpui_kit::init);
         cx.update(theme::register_builtin_themes);
         cx.update(install_openlogi_themes);
-        let (view, cx) = cx.add_window_view(|_, cx| ComponentGallery::new(cx));
+        let (view, cx) = cx.add_window_view(ComponentGallery::new);
 
         cx.update(|window, cx| window.draw(cx).clear(cx));
         view.update(cx, |gallery, cx| {

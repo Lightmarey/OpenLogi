@@ -6,13 +6,13 @@ use openlogi_core::binding::{ButtonId, GestureDirection};
 
 use super::force_sensing::ForceSensingSlider;
 use super::hotspots::MouseControlId;
-use super::inspector::{InvalidDrafts, ShortcutMode};
-use crate::features::binding_editor::ShortcutRecorder;
+use super::inspector::InvalidDrafts;
+use crate::features::binding_editor::ShortcutDraft;
 
 /// The binding editor's mode. Transitions consume the mode and return the
 /// next one, so whatever leaves a mode drops what it held: closing the
 /// picker, selecting another control or switching devices drops a
-/// [`ShortcutRecorder`], and with it the key interception it installed.
+/// [`ShortcutDraft`], and with it any key interception it installed.
 #[derive(Default)]
 pub(super) enum EditorMode {
     /// No control is selected; the inspector summarizes the profile.
@@ -24,13 +24,6 @@ pub(super) enum EditorMode {
     PickerOpen {
         selection: Selection,
         drafts: PickerDrafts,
-    },
-    /// The open picker's Record button waits for the next key press.
-    Recording {
-        selection: Selection,
-        drafts: PickerDrafts,
-        /// Held for its drop, which stops the recording.
-        _recorder: ShortcutRecorder,
     },
 }
 
@@ -56,65 +49,38 @@ impl EditorMode {
     }
 
     /// Open the picker on the selection with fresh drafts.
-    pub(super) fn open_picker(self) -> Self {
+    pub(super) fn open_picker(self, shortcut: ShortcutDraft) -> Self {
         match self {
             Self::Selected(selection) => Self::PickerOpen {
                 selection,
-                drafts: PickerDrafts::default(),
+                drafts: PickerDrafts {
+                    shortcut,
+                    invalid: InvalidDrafts::default(),
+                },
             },
-            mode @ (Self::Idle | Self::PickerOpen { .. } | Self::Recording { .. }) => mode,
+            mode @ (Self::Idle | Self::PickerOpen { .. }) => mode,
         }
     }
 
     /// Close the picker, ending any recording.
     pub(super) fn close_picker(self) -> Self {
         match self {
-            Self::PickerOpen { selection, .. } | Self::Recording { selection, .. } => {
-                Self::Selected(selection)
-            }
+            Self::PickerOpen { selection, .. } => Self::Selected(selection),
             mode @ (Self::Idle | Self::Selected(_)) => mode,
-        }
-    }
-
-    /// Start recording with the recorder `start` returns, or end the
-    /// recording in progress. Only an open picker records.
-    pub(super) fn toggle_recording(self, start: impl FnOnce() -> ShortcutRecorder) -> Self {
-        match self {
-            Self::PickerOpen { selection, drafts } => Self::Recording {
-                selection,
-                drafts,
-                _recorder: start(),
-            },
-            mode @ Self::Recording { .. } => mode.stop_recording(),
-            mode @ (Self::Idle | Self::Selected(_)) => mode,
-        }
-    }
-
-    /// End the recording in progress, keeping the picker open.
-    pub(super) fn stop_recording(self) -> Self {
-        match self {
-            Self::Recording {
-                selection, drafts, ..
-            } => Self::PickerOpen { selection, drafts },
-            mode @ (Self::Idle | Self::Selected(_) | Self::PickerOpen { .. }) => mode,
         }
     }
 
     pub(super) fn selection(&self) -> Option<&Selection> {
         match self {
             Self::Idle => None,
-            Self::Selected(selection)
-            | Self::PickerOpen { selection, .. }
-            | Self::Recording { selection, .. } => Some(selection),
+            Self::Selected(selection) | Self::PickerOpen { selection, .. } => Some(selection),
         }
     }
 
     fn selection_mut(&mut self) -> Option<&mut Selection> {
         match self {
             Self::Idle => None,
-            Self::Selected(selection)
-            | Self::PickerOpen { selection, .. }
-            | Self::Recording { selection, .. } => Some(selection),
+            Self::Selected(selection) | Self::PickerOpen { selection, .. } => Some(selection),
         }
     }
 
@@ -125,20 +91,22 @@ impl EditorMode {
     /// The open picker's drafts, or `None` while the picker is closed.
     pub(super) fn drafts(&self) -> Option<&PickerDrafts> {
         match self {
-            Self::PickerOpen { drafts, .. } | Self::Recording { drafts, .. } => Some(drafts),
+            Self::PickerOpen { drafts, .. } => Some(drafts),
             Self::Idle | Self::Selected(_) => None,
         }
     }
 
     pub(super) fn drafts_mut(&mut self) -> Option<&mut PickerDrafts> {
         match self {
-            Self::PickerOpen { drafts, .. } | Self::Recording { drafts, .. } => Some(drafts),
+            Self::PickerOpen { drafts, .. } => Some(drafts),
             Self::Idle | Self::Selected(_) => None,
         }
     }
 
+    #[cfg(test)]
     pub(super) fn is_recording(&self) -> bool {
-        matches!(self, Self::Recording { .. })
+        self.drafts()
+            .is_some_and(|drafts| drafts.shortcut.is_recording())
     }
 
     /// The press-force slider, while the haptic panel is selected and its
@@ -227,11 +195,9 @@ impl Selection {
     }
 }
 
-/// What the open picker's custom-action editors hold besides their text:
-/// the Tap / Hold choice and which editors rejected their last Add. A newly
-/// opened picker starts from the default.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The open picker's shared shortcut draft and validation for its other
+/// custom-action editors. Closing the picker drops the shortcut draft.
 pub(super) struct PickerDrafts {
-    pub shortcut_mode: ShortcutMode,
+    pub shortcut: ShortcutDraft,
     pub invalid: InvalidDrafts,
 }
