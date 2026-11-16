@@ -77,7 +77,9 @@ impl BindingEditor {
         cx: &mut Context<Self>,
     ) -> Self {
         let (short, long) = match seed {
-            Binding::LongPress(pair) => (pair.short().clone(), Some(pair.long().clone())),
+            Binding::LongPress(pair) if thresholds => {
+                (pair.short().clone(), Some(pair.long().clone()))
+            }
             binding => (binding.click_action(), None),
         };
         let shortcut = ShortcutDraft::new(window, cx);

@@ -158,3 +158,46 @@ fn craft_crown_direct_controls_keep_the_edit_action_with_its_input(cx: &mut Test
         "the input and Edit action stay grouped: {edit:?}"
     );
 }
+
+#[gpui::test]
+fn inherited_threshold_can_be_overridden_in_a_direct_application_profile(cx: &mut TestAppContext) {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    let (view, cx, dir) = editor(cx);
+    let inherited = Binding::LongPress(openlogi_core::binding::LongPressBinding::new(
+        Action::Copy,
+        Action::Paste,
+    ));
+    cx.update(|_, cx| {
+        AppState::apply(cx, |state| {
+            let context = state.crown_editing_context().unwrap();
+            state.commit_crown_input(&context, ButtonId::CrownPress, inherited.clone())
+        });
+        AppState::apply(cx, |state| {
+            state.set_editing_app(Some("org.example.Editor".into()))
+        });
+    });
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.control.update(cx, |state, cx| {
+                state.set_selected_value(&ButtonId::CrownPress, window, cx);
+            });
+        });
+    });
+    draw(cx);
+    click(cx, "crown-edit-binding");
+    assert!(cx.debug_bounds("crown-long").is_none());
+    click(cx, "crown-action-Paste");
+    click(cx, "crown-binding-save");
+    let saved =
+        Config::load_from_path(&dir.path().join(openlogi_core::paths::CONFIG_FILE)).unwrap();
+    assert_eq!(
+        saved.devices[KEY].per_app_bindings["org.example.Editor"][&ButtonId::CrownPress],
+        Action::Paste,
+    );
+    assert_eq!(
+        saved.devices[KEY].bindings[&ButtonId::CrownPress],
+        inherited
+    );
+    click(cx, "crown-edit-binding");
+    assert!(cx.debug_bounds("crown-action-Paste-check").is_some());
+}
