@@ -713,7 +713,7 @@ resolves through the profile. Software reads the original mode before its first
 write, confirms changes by reading them back and restores its tactile lease when
 capture ends. A failed restore stays queued across device reconnection.
 
-**Scroll speed (%)** scales rotation output from 1 to 1000 percent, with 100 as
+**Rotation sensitivity (%)** scales rotation output from 1 to 1000 percent, with 100 as
 native speed. **Reverse rotation** exchanges the directional bindings. Scroll
 actions preserve fractional sensor motion using the Crown's reported slots and
 ratchets per revolution. Other actions retain discrete steps, with fractional

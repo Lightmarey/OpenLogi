@@ -11,6 +11,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub(crate) struct CrownModeHandle {
     requested: watch::Sender<TactileMode>,
+    #[cfg(test)]
     applied: watch::Receiver<Option<TactileMode>>,
 }
 
@@ -24,10 +25,6 @@ impl CrownModeHandle {
             true
         });
     }
-
-    pub(crate) fn applied(&self) -> Option<TactileMode> {
-        *self.applied.borrow()
-    }
 }
 
 pub(crate) struct CrownModeTask {
@@ -36,14 +33,28 @@ pub(crate) struct CrownModeTask {
 }
 
 impl CrownModeTask {
-    pub(crate) fn spawn(op: DeviceOp, lease: Arc<SessionReceiverLease>) -> (CrownModeHandle, Self) {
+    pub(crate) fn spawn(
+        op: DeviceOp,
+        lease: Arc<SessionReceiverLease>,
+        inputs: tokio::sync::mpsc::UnboundedSender<openlogi_hid::CapturedInput>,
+    ) -> (CrownModeHandle, Self) {
         let (requested, request) = watch::channel(TactileMode::Inherit);
+        #[cfg(test)]
         let (applied, observed) = watch::channel(None);
         let (stop, stopping) = oneshot::channel();
-        let task = tokio::spawn(run(op, request, applied, stopping, lease));
+        let task = tokio::spawn(run(
+            op,
+            request,
+            #[cfg(test)]
+            applied,
+            stopping,
+            lease,
+            inputs,
+        ));
         (
             CrownModeHandle {
                 requested,
+                #[cfg(test)]
                 applied: observed,
             },
             Self { stop, task },
@@ -73,9 +84,10 @@ fn tactile(mode: RatchetMode) -> Option<TactileMode> {
 async fn run(
     op: DeviceOp,
     mut requested: watch::Receiver<TactileMode>,
-    applied: watch::Sender<Option<TactileMode>>,
+    #[cfg(test)] applied: watch::Sender<Option<TactileMode>>,
     mut stop: oneshot::Receiver<()>,
     lease: Arc<SessionReceiverLease>,
+    inputs: tokio::sync::mpsc::UnboundedSender<openlogi_hid::CapturedInput>,
 ) -> Option<(openlogi_hid::SharedChannel, RatchetMode)> {
     let mut original = None;
     let mut retry = false;
@@ -107,7 +119,7 @@ async fn run(
                 }
                 Err(error) => {
                     tracing::warn!(%error, "could not acquire Crown tactile lease");
-                    retry = true;
+                    retry = !matches!(error, openlogi_hid::WriteError::FeatureUnsupported { .. });
                     continue;
                 }
             }
@@ -119,11 +131,15 @@ async fn run(
         };
         match write(&op, &lease, mode).await {
             Ok(mode) => {
-                applied.send_replace(tactile(mode));
+                if let Some(mode) = tactile(mode) {
+                    let _ = inputs.send(openlogi_hid::CapturedInput::CrownModeApplied(mode));
+                    #[cfg(test)]
+                    applied.send_replace(Some(mode));
+                }
             }
             Err(error) => {
                 tracing::warn!(%error, "Crown tactile mode was not confirmed");
-                retry = true;
+                retry = !matches!(error, openlogi_hid::WriteError::FeatureUnsupported { .. });
             }
         }
     }
@@ -163,6 +179,8 @@ mod tests {
         mode: u8,
         writes: Vec<u8>,
         reject_restore: bool,
+        controls: u8,
+        info_reads: usize,
     }
 
     struct Fixture {
@@ -182,6 +200,8 @@ mod tests {
                 mode: 2,
                 writes: Vec::new(),
                 reject_restore: false,
+                controls: 4,
+                info_reads: 0,
             }));
             let hardware = Arc::clone(&state);
             openlogi_device::test_support::publish_scripted_channel(
@@ -196,7 +216,10 @@ mod tests {
                     match (request[2], request[3] >> 4) {
                         (0, 1) => response[4] = 4,
                         (0, 0) => response[4] = if request[4..6] == [0x46, 0] { 9 } else { 0 },
-                        (9, 0) => response[4..10].copy_from_slice(&[4, 15, 0, 120, 0, 20]),
+                        (9, 0) => {
+                            state.info_reads += 1;
+                            response[4..10].copy_from_slice(&[state.controls, 15, 0, 120, 0, 20]);
+                        }
                         (9, 1) => response[4..9].copy_from_slice(&[1, state.mode, 17, 29, 41]),
                         (9, 2) => {
                             assert_eq!(
@@ -233,16 +256,24 @@ mod tests {
             }
         }
 
-        fn start(&self) -> (CrownModeHandle, CrownModeTask, Arc<SessionReceiverLease>) {
+        fn start(
+            &self,
+        ) -> (
+            CrownModeHandle,
+            CrownModeTask,
+            Arc<SessionReceiverLease>,
+            tokio::sync::mpsc::UnboundedReceiver<openlogi_hid::CapturedInput>,
+        ) {
             let lease = Arc::new(
                 self.access
                     .receiver_access
                     .try_acquire_for_session()
                     .unwrap(),
             );
+            let (sink, inputs) = tokio::sync::mpsc::unbounded_channel();
             let (handle, task) =
-                CrownModeTask::spawn(self.access.op(&self.route), Arc::clone(&lease));
-            (handle, task, lease)
+                CrownModeTask::spawn(self.access.op(&self.route), Arc::clone(&lease), sink);
+            (handle, task, lease, inputs)
         }
     }
 
@@ -261,13 +292,17 @@ mod tests {
     #[tokio::test]
     async fn crown_modes_are_confirmed_and_the_original_mode_is_restored_before_completion() {
         let fixture = Fixture::new().await;
-        let (handle, task, capture) = fixture.start();
+        let (handle, task, capture, mut inputs) = fixture.start();
         for expected in [
             TactileMode::Smooth,
             TactileMode::Ratchet,
             TactileMode::Smooth,
         ] {
             select(&handle, expected).await;
+            assert_eq!(
+                inputs.try_recv().unwrap(),
+                openlogi_hid::CapturedInput::CrownModeApplied(expected)
+            );
         }
         let mut requests = fixture.access.receiver_access.subscribe_requests();
         let pairing_access = fixture.access.receiver_access.clone();
@@ -291,9 +326,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn nonmechanized_crowns_never_acquire_a_tactile_restore_debt() {
+        let fixture = Fixture::new().await;
+        fixture.state.lock().unwrap().controls = 0;
+        let (handle, task, _capture, _inputs) = fixture.start();
+        handle.request(TactileMode::Smooth);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while fixture.state.lock().unwrap().info_reads == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            task.finish().await.is_none(),
+            "an unsupported write never owns a tactile restore"
+        );
+        assert!(fixture.state.lock().unwrap().writes.is_empty());
+    }
+
+    #[tokio::test]
     async fn crown_failed_restore_remains_owned_until_a_successful_retry() {
         let fixture = Fixture::new().await;
-        let (handle, task, _capture) = fixture.start();
+        let (handle, task, _capture, _inputs) = fixture.start();
         select(&handle, TactileMode::Smooth).await;
         fixture.state.lock().unwrap().reject_restore = true;
         let (channel, original) = task.finish().await.expect("a failed restore remains owned");

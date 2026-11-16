@@ -76,6 +76,8 @@ impl CrownAccum {
         }
         // A latched rotation Stop phase is not movement: real firmware leaves
         // it in clean tap reports. Only actual deltas or press edges disqualify.
+        let started =
+            !self.rotating && matches!(event.rotation_state, crate::crown::RotationState::Start);
         if event.relative_slot_rotation != 0
             || event.relative_ratchet_rotation != 0
             || pressed == Some(true)
@@ -91,6 +93,7 @@ impl CrownAccum {
         }
         if event.relative_slot_rotation != 0
             || event.relative_ratchet_rotation != 0
+            || started
             || (self.rotating && matches!(event.rotation_state, crate::crown::RotationState::Stop))
         {
             let _ = sink.send(CapturedInput::CrownRotation(crate::crown::CrownMotion {
@@ -101,9 +104,10 @@ impl CrownAccum {
                 phase: event.rotation_state,
                 speed: event.speed,
                 pressed: self.pressed,
+                touched: self.touched,
             }));
         }
-        if event.relative_slot_rotation != 0 || event.relative_ratchet_rotation != 0 {
+        if event.relative_slot_rotation != 0 || event.relative_ratchet_rotation != 0 || started {
             self.rotating = true;
         }
         if matches!(event.rotation_state, crate::crown::RotationState::Stop) {
@@ -182,10 +186,50 @@ mod tests {
         );
     }
 
-    fn motion(slots: i8, ratchets: i8, ratcheted: bool, pressed: bool) -> CapturedInput {
+    fn motion(
+        slots: i8,
+        ratchets: i8,
+        ratcheted: bool,
+        pressed: bool,
+        touched: bool,
+    ) -> CapturedInput {
         let mut motion = crate::crown::CrownMotion::new(slots, ratchets, ratcheted);
         motion.pressed = pressed;
+        motion.touched = touched;
         CapturedInput::CrownRotation(motion)
+    }
+
+    #[test]
+    fn zero_motion_start_and_stop_edges_are_emitted_once_with_the_raw_phase() {
+        let (sink, mut inputs) = mpsc::unbounded_channel();
+        let mut crown = CrownAccum::default();
+        let mut event = update(0, 0, 0, 0, 0);
+        for phase in [
+            crate::crown::RotationState::Start,
+            crate::crown::RotationState::Start,
+            crate::crown::RotationState::Stop,
+            crate::crown::RotationState::Stop,
+        ] {
+            event.rotation_state = phase;
+            crown.on_event(event, true, &sink);
+        }
+        let phases = drain(&mut inputs)
+            .into_iter()
+            .map(|input| {
+                let CapturedInput::CrownRotation(motion) = input else {
+                    panic!("rotation lifecycle");
+                };
+                assert_eq!((motion.slots, motion.ratchets), (0, 0));
+                motion.phase
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            phases,
+            [
+                crate::crown::RotationState::Start,
+                crate::crown::RotationState::Stop
+            ]
+        );
     }
 
     #[test]
@@ -193,17 +237,17 @@ mod tests {
         let (sink, mut inputs) = mpsc::unbounded_channel();
         let mut crown = CrownAccum::default();
         crown.on_event(update(12, 2, 0, 0, 0), true, &sink);
-        assert_eq!(drain(&mut inputs), [motion(12, 2, true, false)]);
+        assert_eq!(drain(&mut inputs), [motion(12, 2, true, false, false)]);
         crown.on_event(update(-12, -3, 0, 1, 0), true, &sink);
         assert_eq!(
             drain(&mut inputs),
             [
                 CapturedInput::ButtonDown(ButtonId::CrownPress),
-                motion(-12, -3, true, true),
+                motion(-12, -3, true, true, false),
             ]
         );
         crown.on_event(update(1, 0, 0, 2, 0), true, &sink);
-        assert_eq!(drain(&mut inputs), [motion(1, 0, true, true)]);
+        assert_eq!(drain(&mut inputs), [motion(1, 0, true, true, false)]);
     }
 
     #[test]
@@ -211,7 +255,10 @@ mod tests {
         let (sink, mut inputs) = mpsc::unbounded_channel();
         let mut crown = CrownAccum::default();
         crown.on_event(update(i8::MIN, -1, 0, 0, 0), false, &sink);
-        assert_eq!(drain(&mut inputs), [motion(i8::MIN, -1, false, false)]);
+        assert_eq!(
+            drain(&mut inputs),
+            [motion(i8::MIN, -1, false, false, false)]
+        );
         for gesture in [1, 2, 255] {
             crown.on_event(update(0, 0, 0, 0, gesture), true, &sink);
         }
@@ -228,7 +275,7 @@ mod tests {
         assert_eq!(
             drain(&mut inputs),
             [
-                motion(1, 0, true, true),
+                motion(1, 0, true, true, true),
                 CapturedInput::ButtonUp(ButtonId::CrownTouch),
                 CapturedInput::ButtonUp(ButtonId::CrownPress),
             ]
@@ -246,7 +293,7 @@ mod tests {
                     drain(&mut inputs);
                     crown.on_event(update(direction, direction, 3, 5, 0), ratcheted, &sink);
                     let mut expected = vec![
-                        motion(direction, direction, ratcheted, pressed),
+                        motion(direction, direction, ratcheted, pressed, true),
                         CapturedInput::ButtonUp(ButtonId::CrownTouch),
                     ];
                     if pressed {

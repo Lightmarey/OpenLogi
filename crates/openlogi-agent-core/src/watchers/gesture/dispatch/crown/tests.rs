@@ -43,6 +43,85 @@ fn touch_plan(scope: Option<&str>) -> DispatchPlan {
 }
 
 #[tokio::test]
+async fn crown_motion_uses_the_confirmation_boundary_in_the_ordered_input_stream() {
+    let (actions, mut buttons, events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
+    let parent = HidppSessionId::new("craft");
+    let policy = plan(None);
+    let motion = CapturedInput::CrownRotation(openlogi_hid::crown::CrownMotion::new(2, 0, true));
+    // Movement admitted before the confirmation retains the armed ratchet policy.
+    dispatcher.dispatch(&parent, &policy, motion);
+    dispatcher.dispatch(
+        &parent,
+        &policy,
+        CapturedInput::CrownModeApplied(openlogi_core::rotary::TactileMode::Smooth),
+    );
+    dispatcher.dispatch(&parent, &policy, motion);
+    let completed = (0..4)
+        .map(|_| events.recv_timeout(Duration::from_secs(1)).unwrap())
+        .collect::<Vec<_>>();
+    dispatcher.dispatch(
+        &parent,
+        &policy,
+        CapturedInput::CrownModeApplied(openlogi_core::rotary::TactileMode::Ratchet),
+    );
+    dispatcher.dispatch(&parent, &policy, motion);
+    dispatcher.cancel_session(&parent);
+    dispatcher.retire_crown_mode(&parent);
+    assert!(dispatcher.crown_confirmed.is_empty());
+    assert!(buttons.shutdown());
+    assert!(events.try_iter().next().is_none());
+    let events = completed;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event,
+        ButtonRuntimeEvent::Started(press) if press.start_action() == Some(&Action::VolumeUp)))
+            .count(),
+        2
+    );
+    scroll.shutdown();
+}
+
+#[tokio::test]
+async fn a_replaced_function_session_uses_the_raw_current_press_state() {
+    let (actions, mut buttons, events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
+    let parent = HidppSessionId::new("craft");
+    let mut policy = plan(Some("editor"));
+    let profile = &mut policy.crown.as_mut().unwrap().profile;
+    let mut functions = profile.functions().to_vec();
+    functions[0]
+        .set_binding(CrownControl::PressedRight, Action::NextTab.into())
+        .unwrap();
+    profile.replace_functions(functions).unwrap();
+    let mut motion = openlogi_hid::crown::CrownMotion::new(6, 1, true);
+    motion.pressed = true;
+    motion.touched = true;
+    dispatcher.dispatch(&parent, &policy, CapturedInput::CrownRotation(motion));
+    let ButtonRuntimeEvent::Started(press) = events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("current held rotation");
+    };
+    assert_eq!(press.start_action(), Some(&Action::NextTab));
+    events.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(buttons.shutdown());
+    scroll.shutdown();
+}
+
+#[tokio::test]
 async fn press_selects_on_release_without_firing_a_binding_and_rotation_consumes_selection() {
     let (actions, mut buttons, events) = test_dispatcher();
     let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(

@@ -45,6 +45,7 @@ function label(text) {
     const actor = new St.Label({text, style_class: 'openlogi-crown-name',
         x_align: Clutter.ActorAlign.CENTER, x_expand: true, reactive: false, can_focus: false});
     actor.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+    actor.clutter_text.set_single_line_mode(true);
     return actor;
 }
 

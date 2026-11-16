@@ -132,6 +132,8 @@ pub enum CapturedInput {
     /// Raw signed Crown movement before discrete action pulses are expanded.
     /// Preserves movement between ratchets without treating it as a discrete pulse.
     CrownRotation(crate::crown::CrownMotion),
+    /// Confirmed tactile mode, ordered with reports on the capture input channel.
+    CrownModeApplied(openlogi_core::rotary::TactileMode),
 }
 
 /// HID++-divertable standard buttons: the `0x1b04` control ID and the

@@ -48,6 +48,19 @@ struct Session {
     selection_press: SelectionPress,
 }
 
+impl Session {
+    fn function<'a>(
+        &self,
+        policy: &'a CrownDispatch,
+    ) -> Option<&'a openlogi_core::crown::CrownFunction> {
+        policy
+            .profile
+            .functions()
+            .iter()
+            .find(|function| function.id() == &self.selected)
+    }
+}
+
 type ProfileKey = (String, Option<String>);
 
 #[derive(Default)]
@@ -64,17 +77,21 @@ impl CrownFunctions {
         outputs.crown.cancel(parent);
     }
 
-    pub(super) fn rotation_context(
+    pub(super) fn rotation_function<'a>(
         &self,
         parent: &HidppSessionId,
-    ) -> Option<(HidppSessionId, CrownFunctionId, bool)> {
-        self.sessions.get(parent).map(|session| {
-            (
-                session.output.clone(),
-                session.selected.clone(),
-                session.pressed,
-            )
-        })
+        policy: Option<&'a CrownDispatch>,
+    ) -> Option<(
+        HidppSessionId,
+        &'a openlogi_core::crown::CrownFunction,
+        bool,
+    )> {
+        let session = self.sessions.get(parent)?;
+        Some((
+            session.output.clone(),
+            session.function(policy?)?,
+            session.pressed,
+        ))
     }
 
     pub(super) fn feel(
@@ -139,14 +156,18 @@ impl CrownFunctions {
             })
             .cloned()
             .unwrap_or_else(|| first.id().clone());
+        let (touched, pressed) = match input {
+            CapturedInput::CrownRotation(motion) => (motion.touched, motion.pressed),
+            _ => (false, false),
+        };
         let session = self
             .sessions
             .entry(parent.clone())
             .or_insert_with(|| Session {
                 output: HidppSessionId::new(parent.device_key()),
                 selected,
-                touched: false,
-                pressed: false,
+                touched,
+                pressed,
                 selection_press: SelectionPress::default(),
             });
         handle_input(session, parent, policy, input, modifiers, outputs, plan);
@@ -277,12 +298,7 @@ fn dispatch_control(
         }
         return;
     }
-    let Some(function) = policy
-        .profile
-        .functions()
-        .iter()
-        .find(|function| function.id() == &session.selected)
-    else {
+    let Some(function) = session.function(policy) else {
         return;
     };
     let binding = function.binding(control);

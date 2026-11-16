@@ -31,6 +31,8 @@ pub struct CrownMotion {
     pub speed: i16,
     /// Mechanical press observed for this report before its release edge.
     pub pressed: bool,
+    /// Physical contact observed before this report's release edge.
+    pub touched: bool,
 }
 
 impl CrownMotion {
@@ -45,6 +47,7 @@ impl CrownMotion {
             phase: RotationState::Inactive,
             speed: 0,
             pressed: false,
+            touched: false,
         }
     }
 }
@@ -107,9 +110,10 @@ async fn on_channel(shared: &crate::SharedChannel) -> Result<Arc<CrownFeature>, 
     crate::write::open_feature::<CrownFeature>(&mut device).await
 }
 
-/// Read tactile mode through an existing connection.
+/// Read a motorized tactile mode before acquiring a reversible write lease.
 pub async fn get_mode_on(shared: &crate::SharedChannel) -> Result<RatchetMode, crate::WriteError> {
     let feature = on_channel(shared).await?;
+    require_tactile(&feature, crate::HidppOperation::ReadCrown).await?;
     feature
         .get_mode()
         .await
@@ -129,15 +133,7 @@ pub async fn set_mode_on(
     let classify = |error| {
         crate::write::classify_hidpp_error(error, crate::HidppOperation::WriteCrown, FEATURE_ID)
     };
-    let info = feature.get_info().await.map_err(classify)?;
-    if !info
-        .controls
-        .contains(hidpp::feature::crown::CrownControlCapabilities::MECHANIZED_RATCHET)
-    {
-        return Err(crate::WriteError::FeatureUnsupported {
-            feature_hex: FEATURE_ID,
-        });
-    }
+    require_tactile(&feature, crate::HidppOperation::WriteCrown).await?;
     let before = feature.get_mode().await.map_err(classify)?;
     if before.ratchet_mode != mode {
         feature
@@ -158,6 +154,26 @@ pub async fn set_mode_on(
         ));
     }
     Ok(after)
+}
+
+async fn require_tactile(
+    feature: &CrownFeature,
+    operation: crate::HidppOperation,
+) -> Result<(), crate::WriteError> {
+    let info = feature
+        .get_info()
+        .await
+        .map_err(|error| crate::write::classify_hidpp_error(error, operation, FEATURE_ID))?;
+    if info
+        .controls
+        .contains(hidpp::feature::crown::CrownControlCapabilities::MECHANIZED_RATCHET)
+    {
+        Ok(())
+    } else {
+        Err(crate::WriteError::FeatureUnsupported {
+            feature_hex: FEATURE_ID,
+        })
+    }
 }
 
 /// Attribute a crown notification, rejecting replies and other devices/features.

@@ -113,6 +113,7 @@ pub(super) struct InputDispatcher {
     crown: crown::CrownFunctions,
     crown_modes: HashMap<u64, crate::hardware::crown::CrownModeHandle>,
     crown_steps: HashMap<u64, CrownSteps>,
+    crown_confirmed: HashMap<u64, openlogi_core::rotary::TactileMode>,
 }
 
 impl InputDispatcher {
@@ -127,6 +128,7 @@ impl InputDispatcher {
             crown: crown::CrownFunctions::default(),
             crown_modes: HashMap::new(),
             crown_steps: HashMap::new(),
+            crown_confirmed: HashMap::new(),
         }
     }
 
@@ -142,6 +144,7 @@ impl InputDispatcher {
 
     pub(super) fn retire_crown_mode(&mut self, session: &HidppSessionId) {
         self.crown_modes.remove(&session.epoch());
+        self.crown_confirmed.remove(&session.epoch());
     }
 
     pub(super) fn refresh_crown_mode(&self, session: &HidppSessionId, plan: &DispatchPlan) {
@@ -252,6 +255,31 @@ impl InputDispatcher {
         );
     }
 
+    fn dispatch_crown_input(
+        &mut self,
+        session: &HidppSessionId,
+        plan: &DispatchPlan,
+        input: CapturedInput,
+        modifiers: openlogi_core::config::KeyModifiers,
+    ) -> bool {
+        if let CapturedInput::CrownModeApplied(mode) = input {
+            self.crown_confirmed.insert(session.epoch(), mode);
+            return true;
+        }
+        let handled = self
+            .crown
+            .dispatch(session, plan, input, modifiers, &self.outputs);
+        if let CapturedInput::CrownRotation(motion) = input {
+            self.dispatch_crown_motion(session, plan, motion);
+            self.refresh_crown_mode(session, plan);
+            return true;
+        }
+        if handled {
+            self.refresh_crown_mode(session, plan);
+        }
+        handled
+    }
+
     pub(super) fn dispatch_with_modifiers(
         &mut self,
         session: &HidppSessionId,
@@ -259,21 +287,10 @@ impl InputDispatcher {
         input: CapturedInput,
         modifiers: openlogi_core::config::KeyModifiers,
     ) {
-        if let CapturedInput::CrownRotation(motion) = input {
-            self.crown
-                .dispatch(session, plan, input, modifiers, &self.outputs);
-            self.dispatch_crown_motion(session, plan, motion);
-            self.refresh_crown_mode(session, plan);
+        if self.dispatch_crown_input(session, plan, input, modifiers) {
             return;
         }
         let key = session.device_key();
-        if self
-            .crown
-            .dispatch(session, plan, input, modifiers, &self.outputs)
-        {
-            self.refresh_crown_mode(session, plan);
-            return;
-        }
         match input {
             CapturedInput::Gesture(button, direction) => {
                 let Some(press) = self.held_presses.get(session, button) else {
@@ -358,7 +375,9 @@ impl InputDispatcher {
             CapturedInput::ButtonDiverted(_) => {
                 unreachable!("the session's forwarder records diverted buttons instead")
             }
-            CapturedInput::CrownTap | CapturedInput::CrownRotation(_) => {}
+            CapturedInput::CrownTap
+            | CapturedInput::CrownRotation(_)
+            | CapturedInput::CrownModeApplied(_) => {}
         }
     }
 
@@ -370,19 +389,7 @@ impl InputDispatcher {
     ) {
         use openlogi_core::crown::CrownControl;
         use openlogi_core::rotary::{RotarySettings, TactileMode, scroll_for_action};
-        let function =
-            self.crown
-                .rotation_context(parent)
-                .and_then(|(output, selected, pressed)| {
-                    let function = plan
-                        .crown
-                        .as_ref()?
-                        .profile
-                        .functions()
-                        .iter()
-                        .find(|function| function.id() == &selected)?;
-                    Some((output, function, pressed))
-                });
+        let function = self.crown.rotation_function(parent, plan.crown.as_ref());
         let (output, settings, pressed) = function.as_ref().map_or_else(
             || {
                 (
@@ -396,10 +403,15 @@ impl InputDispatcher {
             |(output, function, pressed)| (output.clone(), function.rotation(), *pressed),
         );
         let ratcheted = self
-            .crown_modes
+            .crown_confirmed
             .get(&parent.epoch())
-            .and_then(crate::hardware::crown::CrownModeHandle::applied)
-            .map_or(motion.ratcheted, |mode| mode == TactileMode::Ratchet);
+            .map_or(motion.ratcheted, |mode| *mode == TactileMode::Ratchet);
+        let native = if motion.slots == 0 {
+            f64::from(motion.ratchets)
+        } else {
+            f64::from(motion.slots) * motion.resolution.native_per_increment()
+        };
+        let distance = native * settings.sensitivity.multiplier();
         let steps = if ratcheted {
             motion.ratchets
         } else {
@@ -430,12 +442,7 @@ impl InputDispatcher {
             |(_, function, _)| function.binding(control),
         );
         let action = binding.click_action();
-        let distance = if motion.slots == 0 {
-            f64::from(motion.ratchets.unsigned_abs())
-        } else {
-            f64::from(motion.slots.unsigned_abs()) * motion.resolution.native_per_increment()
-        } * settings.sensitivity.multiplier();
-        if let Some(delta) = scroll_for_action(&action, distance) {
+        if let Some(delta) = scroll_for_action(&action, distance.abs()) {
             self.outputs.post_crown_scroll(&output, delta);
             return;
         }

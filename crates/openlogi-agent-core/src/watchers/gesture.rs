@@ -581,10 +581,12 @@ impl GestureManagerState {
                 continue;
             };
             let id = HidppSessionId::new(&plan.dispatch.config_key);
+            let inputs = mpsc::unbounded_channel();
             let crown_mode = if plan.dispatch.crown.is_some() || plan.target.spec.capture_crown {
                 let (handle, task) = crate::hardware::crown::CrownModeTask::spawn(
                     channels.access.op(&plan.target.route),
                     Arc::clone(&session_lease),
+                    inputs.0.clone(),
                 );
                 self.input_dispatcher
                     .register_crown_mode(&id, handle, &plan.dispatch);
@@ -592,7 +594,14 @@ impl GestureManagerState {
             } else {
                 None
             };
-            let session = spawn_session(id, plan.clone(), session_lease, channels, crown_mode);
+            let session = spawn_session(
+                id,
+                plan.clone(),
+                session_lease,
+                channels,
+                crown_mode,
+                inputs,
+            );
             self.slots
                 .insert(key.clone(), GestureSlot::running(session));
         }
@@ -847,6 +856,10 @@ fn spawn_session(
     lease: Arc<SessionReceiverLease>,
     channels: &SessionChannels,
     crown_mode: Option<crate::hardware::crown::CrownModeTask>,
+    inputs: (
+        mpsc::UnboundedSender<CapturedInput>,
+        mpsc::UnboundedReceiver<CapturedInput>,
+    ),
 ) -> RunningSession {
     let DeviceCapturePlan {
         target, dispatch, ..
@@ -860,7 +873,7 @@ fn spawn_session(
     };
     // Tag this session's inputs with its device key so dispatch resolves them
     // against the right plan.
-    let (session_tx, session_rx) = mpsc::unbounded_channel::<CapturedInput>();
+    let (session_tx, session_rx) = inputs;
     let forward_task = spawn_input_forwarder(
         physical_key.clone(),
         id.clone(),

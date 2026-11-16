@@ -318,11 +318,13 @@ export async function run() {
     extension.disable();
     await Scripting.sleep(1200);
     extension.enable();
-    await until(() => selectedName(extension) === 'Workspaces', 'Extension re-enable must recover the current selection');
+    await until(() => selectedName(extension) === 'Workspaces' && extension._actor?.mapped && extension._actor.opacity === 255,
+        'Extension re-enable must visibly recover the current selection');
     const recovered = extension._actor;
     extension.disable();
     extension.enable();
-    await until(() => extension._actor !== null && extension._actor !== recovered,
+    await until(() => extension._actor !== null && extension._actor !== recovered &&
+        extension._actor.mapped && extension._actor.opacity === 255,
         'A quick extension restart must recover even inside one heartbeat');
     check(global.display.focus_window === focused, 'Bridge recovery must retain application focus');
     advance();
