@@ -1581,7 +1581,11 @@ impl Orchestrator {
             }
             plans.push(plan);
         }
-        crate::applications::apply_crown_contexts(&self.shared.applications, &mut plans);
+        crate::applications::apply_crown_contexts(
+            &self.shared.applications,
+            &mut plans,
+            self.current_app.as_deref(),
+        );
         CapturePublication::new(plans, routes)
     }
 

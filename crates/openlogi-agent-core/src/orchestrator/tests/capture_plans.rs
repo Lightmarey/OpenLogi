@@ -266,7 +266,7 @@ async fn application_tools_keep_the_matched_scope_and_never_replace_saved_functi
     let _server = ApplicationServer::start_at(Arc::clone(&host), &endpoint).unwrap();
     let mut client = Client::connect_at(&endpoint, info.clone()).await.unwrap();
     client.set_context(1, Some(tools(50))).await.unwrap();
-    let context = context(&host, &info.id, 1).await;
+    context(&host, &info.id, 1).await;
     orch.refresh_application_contexts();
     let online = orch.shared.capture_plans.borrow().plans()[0].clone();
     assert_eq!(online.target, offline.target);
@@ -277,7 +277,31 @@ async fn application_tools_keep_the_matched_scope_and_never_replace_saved_functi
     let session = host
         .activate(
             ControlScope::new("a".into(), policy.scope.clone()),
-            &context,
+            policy.application.as_ref().unwrap(),
+            capabilities(),
+            ControlId::new("zoom".into()).unwrap(),
+            SelectionInput::Press,
+        )
+        .unwrap();
+    assert!(matches!(
+        next(&mut client).await,
+        ServerMessage::Activated(_)
+    ));
+    orch.set_current_app(Some(ForegroundApp::unnamed(r"c:\zen-v4\zen.exe".into())));
+    let switched = orch.shared.capture_plans.borrow().plans()[0].clone();
+    let switched_policy = switched.dispatch.crown.as_ref().unwrap();
+    assert_eq!(switched_policy.scope, policy.scope);
+    assert_ne!(
+        switched_policy.application, policy.application,
+        "a different focused application must replace the activation even inside one matched alias"
+    );
+    assert!(matches!(next(&mut client).await,
+        ServerMessage::Deactivated { session: ended, reason: DeactivationReason::FocusChanged } if ended == session.id()));
+    assert!(host.values(session).is_empty());
+    let session = host
+        .activate(
+            ControlScope::new("a".into(), switched_policy.scope.clone()),
+            switched_policy.application.as_ref().unwrap(),
             capabilities(),
             ControlId::new("zoom".into()).unwrap(),
             SelectionInput::Press,

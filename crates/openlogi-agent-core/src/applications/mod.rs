@@ -37,9 +37,15 @@ pub struct ApplicationContext {
     connection: u64,
     revision: u64,
     tools: ToolSet,
+    focus: Option<String>,
 }
 
 impl ApplicationContext {
+    pub(crate) fn with_focus(mut self, focus: Option<&str>) -> Self {
+        self.focus = focus.map(str::to_owned);
+        self
+    }
+
     pub(crate) const fn provider(&self) -> &ProviderId {
         &self.provider
     }
@@ -296,6 +302,7 @@ impl ApplicationHost {
             connection: provider.connection,
             revision: provider.revision,
             tools: provider.tools.clone()?,
+            focus: None,
         })
     }
 

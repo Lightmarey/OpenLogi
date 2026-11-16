@@ -7,7 +7,11 @@ use openlogi_core::crown::{CrownError, CrownFunction, CrownFunctionId, CrownProf
 use super::{ApplicationContext, ApplicationHost, ControlScope};
 use crate::capture_plan::DeviceCapturePlan;
 
-pub(crate) fn apply_crown_contexts(host: &ApplicationHost, plans: &mut [DeviceCapturePlan]) {
+pub(crate) fn apply_crown_contexts(
+    host: &ApplicationHost,
+    plans: &mut [DeviceCapturePlan],
+    focus: Option<&str>,
+) {
     let mut allowed = BTreeMap::new();
     for plan in plans {
         let Some(policy) = plan
@@ -22,6 +26,7 @@ pub(crate) fn apply_crown_contexts(host: &ApplicationHost, plans: &mut [DeviceCa
             .profile
             .provider()
             .and_then(|provider| host.resolve(provider))
+            .map(|context| context.with_focus(focus))
         else {
             continue;
         };

@@ -95,7 +95,7 @@ impl Preview {
             (
                 "item",
                 ControlInput::Press {
-                    down: false,
+                    down: true,
                     reserved: false,
                 },
             ) => {
@@ -242,10 +242,17 @@ mod tests {
         assert_eq!(preview.zoom, 103);
         assert!(preview.input("zoom", &rotate(1000.0)));
         assert_eq!(preview.zoom, 200);
-        assert!(preview.input(
+        assert!(!preview.input(
             "item",
             &ControlInput::Press {
                 down: false,
+                reserved: false
+            }
+        ));
+        assert!(preview.input(
+            "item",
+            &ControlInput::Press {
+                down: true,
                 reserved: false
             }
         ));

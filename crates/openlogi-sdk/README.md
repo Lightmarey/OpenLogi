@@ -11,7 +11,7 @@ cargo run -p openlogi-sdk --example parameters
 ```
 
 The terminal preview exposes **Preview zoom** and **Preview item**. Rotation
-changes its actual preview state. An unreserved press release advances the item.
+changes its actual preview state. An unreserved press advances the item. Release edges leave its state unchanged.
 The application publishes its resulting value to every active source and retains
 its state when the agent restarts.
 

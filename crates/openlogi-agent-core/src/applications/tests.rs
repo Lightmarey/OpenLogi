@@ -178,6 +178,13 @@ async fn sdk_parameter_example_completes_the_parameter_command_and_reconnection_
     host.input(
         active,
         ControlInput::Press {
+            down: true,
+            reserved: false,
+        },
+    );
+    host.input(
+        active,
+        ControlInput::Press {
             down: false,
             reserved: false,
         },
