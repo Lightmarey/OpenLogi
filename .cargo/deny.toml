@@ -1,7 +1,7 @@
 # cargo-deny configuration — advisories, licenses, and source hygiene.
 #
-# Scope: the graph rooted at the CLI, which is exactly what OpenLogi publishes to
-# crates.io. The app crates (gui/agent) are not covered; auditing their broader
+# Scope: the published CLI and native SDK dependency roots, checked separately.
+# The app crates (gui/agent) are not covered; auditing their broader
 # native UI graph remains a separate policy decision.
 # The `allow-git` list below is written for that wider graph and is therefore
 # unmatched today — kept so widening the scope is a policy decision, not an
@@ -10,6 +10,8 @@
 # Run locally with the same scope CI uses:
 #   cargo deny --config .cargo/deny.toml --all-features \
 #     --manifest-path crates/openlogi/Cargo.toml check
+#   cargo deny --config .cargo/deny.toml --all-features \
+#     --manifest-path crates/openlogi-sdk/Cargo.toml check
 #   nix run nixpkgs#cargo-deny -- --config .cargo/deny.toml --all-features \
 #     --manifest-path crates/openlogi/Cargo.toml check
 #   cargo xtask ci cargo-deny

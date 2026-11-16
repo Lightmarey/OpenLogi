@@ -114,6 +114,20 @@ fn wasm_checks_the_crates_ci_checks() {
     }
 }
 
+#[test]
+fn dependency_audit_checks_each_published_root_in_ci() {
+    let Some(workflow) = workflow() else {
+        return;
+    };
+    let commands = workflow_commands(&workflow);
+    for manifest in super::steps::audit_manifests() {
+        assert!(
+            commands.contains(&format!("--manifest-path {manifest} check")),
+            "ci.yml's dependency audit does not check {manifest}"
+        );
+    }
+}
+
 /// The job id and `name:` of the aggregate at the end of `ci.yml`: the one
 /// status check the master ruleset requires. It runs no command, so it has no
 /// [`Job`] and nothing to reproduce; what must not drift is its `needs`.

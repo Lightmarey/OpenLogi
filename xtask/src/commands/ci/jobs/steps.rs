@@ -25,7 +25,7 @@ use crate::support::manifest::workspace_package;
 /// A crate missing here is a crate whose Windows paths nothing checks until CI
 /// — which is how three `chunks_exact` sites in `openlogi-camera` survived a
 /// whole lint sweep.
-const WINDOWS_LINT_CRATES: [&str; 8] = [
+const WINDOWS_LINT_CRATES: [&str; 9] = [
     "openlogi-core",
     "openlogi-hidpp",
     "openlogi-hid",
@@ -34,6 +34,7 @@ const WINDOWS_LINT_CRATES: [&str; 8] = [
     "openlogi-camera",
     "openlogi-agent",
     "openlogi-agent-core",
+    "openlogi-sdk",
 ];
 
 /// The crates that must keep compiling with no OS underneath them.
@@ -53,7 +54,18 @@ const WASM_PORTABLE_CRATES: [&str; 3] = [
 ];
 
 /// The crates that are portable once their host-facing feature is off.
-const WASM_PORTABLE_NO_DEFAULT_CRATES: [&str; 1] = ["openlogi-core"];
+const WASM_PORTABLE_NO_DEFAULT_CRATES: [&str; 2] = ["openlogi-core", "openlogi-sdk"];
+
+/// Independently published dependency roots covered by the audit policy.
+const AUDIT_MANIFESTS: [&str; 2] = [
+    "crates/openlogi/Cargo.toml",
+    "crates/openlogi-sdk/Cargo.toml",
+];
+
+#[cfg(test)]
+pub(super) const fn audit_manifests() -> [&'static str; 2] {
+    AUDIT_MANIFESTS
+}
 
 /// Every crate the wasm job checks, however it checks it.
 #[cfg(test)]
@@ -327,15 +339,6 @@ fn tests_macos(job: Job) -> Plan {
 /// crates.io. cargo-deny picks its roots from the manifest it is given, and a
 /// virtual workspace root would drag the git-pinned gpui tree into the graph.
 fn cargo_deny(job: Job) -> Plan {
-    const ARGS: [&str; 6] = [
-        "--config",
-        ".cargo/deny.toml",
-        "--all-features",
-        "--manifest-path",
-        "crates/openlogi/Cargo.toml",
-        "check",
-    ];
-
     let Some(invocation) = first_available(&CARGO_DENY) else {
         return Plan::skip(
             job,
@@ -344,9 +347,16 @@ fn cargo_deny(job: Job) -> Plan {
     };
     let plan = Plan::run(
         job,
-        [Step::new(invocation.program)
-            .args(invocation.prefix)
-            .args(ARGS)],
+        AUDIT_MANIFESTS.map(|manifest| {
+            Step::new(invocation.program).args(invocation.prefix).args([
+                "--config",
+                ".cargo/deny.toml",
+                "--all-features",
+                "--manifest-path",
+                manifest,
+                "check",
+            ])
+        }),
     );
     match invocation.note {
         Some(note) => plan.note(note),

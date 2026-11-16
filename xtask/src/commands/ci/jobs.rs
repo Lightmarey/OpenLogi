@@ -187,7 +187,7 @@ impl Job {
             Self::CargoDeny => default_spec(
                 "cargo-deny",
                 &["deny"],
-                "Rooted at crates/openlogi — exactly the crates published to crates.io. Falls back to `nix run nixpkgs#cargo-deny` when the binary is not installed.",
+                "Audits the published CLI and application SDK dependency roots. Falls back to `nix run nixpkgs#cargo-deny` when the binary is not installed.",
             ),
             Self::ClippyWindows => Spec {
                 name: "clippy (windows)",

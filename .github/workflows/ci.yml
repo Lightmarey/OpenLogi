@@ -406,13 +406,10 @@ jobs:
         with:
           tool: cargo-deny
       # Global flags before subcommand (matches cargo-deny-action defaults).
-      # The graph is rooted at the CLI — i.e. exactly the crates published to
-      # crates.io. cargo-deny picks its roots from the manifest it is given, so
-      # this was implicit while `openlogi` was the workspace root package; with a
-      # virtual root it must be explicit, or the git-pinned gpui/zed tree enters
-      # the graph and the policy in `.cargo/deny.toml` no longer holds. Widening
-      # the scope to the app crates is tracked separately — see that file.
+      # Audit both published dependency roots explicitly. The virtual workspace
+      # also contains application-only GPUI dependencies with a separate policy.
       - run: cargo deny --config .cargo/deny.toml --all-features --manifest-path crates/openlogi/Cargo.toml check
+      - run: cargo deny --config .cargo/deny.toml --all-features --manifest-path crates/openlogi-sdk/Cargo.toml check
 
   clippy-windows:
     name: clippy (windows)
@@ -488,9 +485,8 @@ jobs:
       # here and nowhere else. The crate list lives in xtask
       # (`WASM_PORTABLE_CRATES`) and the drift test keeps the two in step.
       - run: cargo check -p openlogi-device-registry -p openlogi-hidpp -p openlogi-device --target wasm32-unknown-unknown
-      # `openlogi-core` earns its place only with `fs` off: that feature is
-      # the config file, and a config file needs a filesystem.
-      - run: cargo check -p openlogi-core --no-default-features --target wasm32-unknown-unknown
+      # Core excludes filesystem plumbing and SDK excludes its native client.
+      - run: cargo check -p openlogi-core -p openlogi-sdk --no-default-features --target wasm32-unknown-unknown
 
   # The one status check the master ruleset requires. Requiring this job
   # instead of each job above keeps the ruleset valid across job renames and
