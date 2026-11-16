@@ -23,6 +23,7 @@ impl SnapshotChanges {
 
 /// Agent-owned observations accepted by the GUI for this process session.
 pub(super) struct AgentSession {
+    providers: Vec<openlogi_core::application_control::ProviderDescriptor>,
     link: AgentLink,
     foreground: ForegroundApps,
     /// Whether Flow runs and the link state of each configured peer.
@@ -40,6 +41,7 @@ pub(super) struct AgentSession {
 impl Default for AgentSession {
     fn default() -> Self {
         Self {
+            providers: Vec::new(),
             link: AgentLink::Connecting,
             foreground: ForegroundApps::default(),
             flow: FlowStatus::default(),
@@ -54,6 +56,22 @@ impl Default for AgentSession {
 }
 
 impl AppState {
+    pub(crate) fn application_providers(
+        &self,
+    ) -> &[openlogi_core::application_control::ProviderDescriptor] {
+        &self.agent.providers
+    }
+
+    pub(crate) fn set_application_providers(
+        &mut self,
+        providers: Vec<openlogi_core::application_control::ProviderDescriptor>,
+    ) -> StateEvents {
+        if self.agent.providers == providers {
+            return StateEvents::none();
+        }
+        self.agent.providers = providers;
+        StateEvent::ApplicationProvidersChanged.into()
+    }
     /// Apply one complete agent snapshot through the desktop's production
     /// state projection, without requiring GPUI or an IPC connection.
     ///

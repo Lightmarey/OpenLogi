@@ -752,6 +752,27 @@ matcher. An inherited profile can be edited in the current application scope to
 create an override. A disabled application profile uses its direct input bindings.
 The [complete example](config.example.toml) contains all three starter functions.
 
+### Native application tools
+
+In an application profile, **Application provider** selects a registered native
+application. Its stable provider ID can also be saved while the application is
+offline. An empty ID uses local functions. The **Local fallback functions** list
+remains editable and resumes when the provider disconnects or withdraws its tools.
+Local and provider function selections are remembered independently.
+
+The provider publishes 1–8 tools and their measured parameter values. Context and
+focus changes end its previous input session. Dynamic tools and values live only
+for that connection. They are never written into the saved function list.
+
+Run the [Rust preview example](../crates/openlogi-sdk/README.md), select
+`example-preview` in its terminal's application profile and focus that terminal.
+Choose **Touch gesture Tap** to leave mechanical presses available to the example's
+item command. Rotation changes the real preview zoom or item, and the HUD shows
+the value reported by the application. The native protocol is independently
+versioned. Logitech Craft SDK compatibility is planned as a separate adapter.
+
+### HUD and recovery
+
 The agent publishes a read-only HUD while the Crown is touched or pressed and for
 800 ms after release. On GNOME, install the bundled
 [Crown HUD extension](../crates/openlogi-overlay/gnome-shell-extension/README.md).

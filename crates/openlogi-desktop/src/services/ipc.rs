@@ -58,6 +58,7 @@ use crate::state::{DeviceKey, FlowPairingRefusal};
 
 mod launch;
 mod link;
+mod providers;
 mod reflex;
 mod request;
 
@@ -107,6 +108,8 @@ const RECONNECT_DELAY: Duration = Duration::from_millis(250);
 
 /// What the client thread tells the GPUI loop.
 pub enum GuiUpdate {
+    /// Online application providers. Saved offline references remain in config.
+    ApplicationProviders(Vec<openlogi_core::application_control::ProviderDescriptor>),
     /// The agent's state, as of a generation this client had not seen.
     Snapshot(Box<AgentSnapshot>),
     /// An established connection dropped. The agent may only be restarting —
@@ -305,7 +308,13 @@ pub fn spawn() -> Handle {
     let (commands, mut cmd_rx) = mpsc::unbounded_channel::<Command>();
 
     let started = openlogi_core::worker::spawn("openlogi-ipc-client", move |runtime| {
-        runtime.block_on(observe_loop(&mut System, &update_tx, &mut cmd_rx));
+        runtime.block_on(async {
+            let mut effects = System;
+            tokio::select! {
+                () = observe_loop(&mut effects, &update_tx, &mut cmd_rx) => {}
+                () = providers::observe(&update_tx) => {}
+            }
+        });
     });
     if let Err(error) = started {
         warn!(%error, "could not start the IPC client thread — agent state unavailable");

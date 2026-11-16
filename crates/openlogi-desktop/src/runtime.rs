@@ -294,6 +294,11 @@ impl Runtime {
     )]
     fn on_agent_update(&mut self, update: ipc::GuiUpdate, cx: &AsyncApp) {
         match update {
+            ipc::GuiUpdate::ApplicationProviders(providers) => {
+                cx.update(|cx| {
+                    AppState::apply(cx, |state| state.set_application_providers(providers));
+                });
+            }
             ipc::GuiUpdate::Snapshot(snapshot) => {
                 self.apply_snapshot(&snapshot, cx);
                 self.snapshot = Some(*snapshot);

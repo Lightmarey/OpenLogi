@@ -18,6 +18,8 @@ use crate::services::ipc::UnpairFailure;
 /// Semantic changes emitted by the shared application-state entity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StateEvent {
+    /// The connected application provider directory changed.
+    ApplicationProvidersChanged,
     /// Agent connection or permission state changed.
     AgentChanged,
     /// The foreground application or recent-application list changed.
@@ -114,6 +116,7 @@ impl StateEvent {
             | Self::LightingChanged(key)
             | Self::DeviceConfigChanged(key) => Some(key),
             Self::AgentChanged
+            | Self::ApplicationProvidersChanged
             | Self::ForegroundChanged
             | Self::DiagnosticsChanged
             | Self::InventoryChanged
@@ -258,6 +261,7 @@ impl AppState {
             StateEvent::DeviceRemovalFailed { .. }
             | StateEvent::StalePairingRemovalFailed { .. } => false,
             StateEvent::AgentChanged
+            | StateEvent::ApplicationProvidersChanged
             | StateEvent::ForegroundChanged
             | StateEvent::DiagnosticsChanged
             | StateEvent::BindingsChanged(_)

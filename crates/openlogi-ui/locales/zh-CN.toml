@@ -795,6 +795,15 @@ left_slot = "Left slot"
 top_left_slot = "Top-left slot"
 
 [keyboard]
+crown_fallback_functions = "Local fallback functions"
+crown_provider = "Application provider"
+crown_local_functions = "Local functions"
+crown_provider_offline = "offline"
+crown_provider_connected = "Provider connected"
+crown_provider_offline_hint = "Provider offline, using local functions"
+crown_provider_id_hint = "Enter a provider ID to save an offline reference. Leave empty to use local functions."
+crown_provider_invalid = "Provider IDs use 1–64 ASCII letters, digits, '-' or '_'."
+
 crown_actions = "Actions"
 crown_move_up = "向前移动"
 crown_move_down = "向后移动"

@@ -2,6 +2,7 @@ use super::*;
 use crate::state::ConfigPersistence;
 use crate::state::tests::crown::{KEY, crown_state};
 use gpui::{TestAppContext, VisualTestContext, px, size};
+use openlogi_core::application_control::{ProviderDescriptor, ProviderId};
 use openlogi_core::binding::Action;
 use openlogi_core::config::{Config, ConfigFile};
 
@@ -29,6 +30,92 @@ fn editor(
 
 fn draw(cx: &mut VisualTestContext) {
     cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+#[gpui::test]
+fn crown_provider_drafts_survive_directory_updates_cancel_and_save_offline(
+    cx: &mut TestAppContext,
+) {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    let (view, cx, dir) = editor(cx);
+    cx.update(|_, cx| {
+        AppState::apply(cx, |state| {
+            state.set_editing_app(Some("org.example.Editor".into()))
+        });
+    });
+    draw(cx);
+    click(cx, "crown-functions-mode");
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.provider.id_input.update(cx, |input, cx| {
+                input.set_value("offline-preview", window, cx);
+            });
+        });
+        AppState::apply(cx, |state| {
+            state.set_application_providers(vec![ProviderDescriptor::new(
+                ProviderId::new("online-preview".into()).unwrap(),
+                "Online preview".into(),
+            )])
+        });
+    });
+    draw(cx);
+    view.read_with(cx, |view, cx| {
+        assert_eq!(
+            view.provider.id_input.read(cx).value().as_ref(),
+            "offline-preview"
+        );
+    });
+    cx.simulate_event(gpui::ScrollEvent {
+        position: gpui::point(px(170.), px(400.)),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-1600.))),
+        modifiers: gpui::Modifiers::default(),
+        touch_phase: gpui::TouchPhase::Moved,
+        source: gpui::ScrollSource::Pointer,
+    });
+    draw(cx);
+    click(cx, "crown-provider-save");
+    let path = dir.path().join(openlogi_core::paths::CONFIG_FILE);
+    let saved = Config::load_from_path(&path).unwrap();
+    assert_eq!(
+        saved.devices[KEY].crown.per_app["org.example.Editor"]
+            .provider()
+            .unwrap()
+            .as_ref(),
+        "offline-preview"
+    );
+    let bytes = std::fs::read(&path).unwrap();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.provider.id_input.update(cx, |input, cx| {
+                input.set_value("unsaved-preview", window, cx);
+            });
+        });
+    });
+    draw(cx);
+    click(cx, "crown-provider-cancel");
+    view.read_with(cx, |view, cx| {
+        assert_eq!(
+            view.provider.id_input.read(cx).value().as_ref(),
+            "offline-preview"
+        );
+    });
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.provider
+                .id_input
+                .update(cx, |input, cx| input.set_value("bad provider", window, cx));
+        });
+    });
+    draw(cx);
+    click(cx, "crown-provider-save");
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    view.read_with(cx, |view, _| assert!(view.error.is_some()));
+    cx.update(|_, cx| {
+        AppState::apply(cx, |state| state.set_editing_app(None));
+        view.update(cx, super::CrownEditor::save_provider);
+    });
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }
 
 #[gpui::test]

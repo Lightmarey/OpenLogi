@@ -425,6 +425,7 @@ impl AppView {
             // caches no localized text. A refused removal is a dialog,
             // opened through `removal_obs`.
             StateEvent::SmartShiftChanged(_)
+            | StateEvent::ApplicationProvidersChanged
             | StateEvent::DisableKeysChanged(_)
             | StateEvent::ReportRateChanged(_)
             | StateEvent::PointerSpeedChanged(_)
