@@ -20,7 +20,7 @@ use tracing::{debug, error};
 
 use crate::ForegroundApp;
 
-mod gnome_shell;
+pub(super) mod gnome_shell;
 mod lifecycle;
 mod stop;
 mod wlr_foreign_toplevel;

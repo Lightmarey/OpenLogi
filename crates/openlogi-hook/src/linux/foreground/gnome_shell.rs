@@ -27,10 +27,13 @@ use zbus::blocking::connection::Builder;
 use zbus::proxy;
 
 use super::{FrontmostSource, PublishAppId, RECONNECT_DELAY, StopToken};
+use crate::KeyModifiers;
 
-/// Cap on every D-Bus call to the extension. Without it, a stalled GNOME Shell
+/// Cap on focus-backend D-Bus calls. Without it, a stalled GNOME Shell
 /// could block backend selection or an explicit snapshot read indefinitely.
 const METHOD_TIMEOUT: Duration = Duration::from_secs(5);
+/// Selection input has a shorter latency budget than an idle focus snapshot.
+const MODIFIER_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// D-Bus proxy for the OpenLogi GNOME Shell extension. The blocking proxy owns
 /// idle snapshots; the async proxy lets one worker select focus and owner
@@ -46,9 +49,29 @@ trait Frontmost {
     #[zbus(name = "GetFocusedWmClass")]
     fn get_focused_wm_class(&self) -> zbus::Result<String>;
 
+    /// Current desktop modifiers, available independently of evdev access.
+    #[zbus(name = "GetHeldModifiers")]
+    fn get_held_modifiers(&self) -> zbus::Result<(bool, bool, bool, bool)>;
+
     /// Emitted whenever GNOME's focused window changes.
     #[zbus(signal, name = "FocusedWmClassChanged")]
     fn focused_wm_class_changed(&self, wm_class: &str) -> zbus::Result<()>;
+}
+
+pub(in crate::linux) fn held_modifiers() -> Option<KeyModifiers> {
+    let connection = Builder::session()
+        .ok()?
+        .method_timeout(MODIFIER_TIMEOUT)
+        .build()
+        .ok()?;
+    let proxy = FrontmostProxyBlocking::new(&connection).ok()?;
+    let (shift, control, option, command) = proxy.get_held_modifiers().ok()?;
+    Some(KeyModifiers {
+        shift,
+        control,
+        option,
+        command,
+    })
 }
 
 /// Frontmost backend talking to the OpenLogi GNOME Shell extension over the
@@ -243,15 +266,4 @@ pub(super) fn candidate() -> Option<Box<dyn FrontmostSource>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::app_id;
-
-    #[test]
-    fn empty_wm_class_represents_no_focused_application() {
-        assert_eq!(app_id(String::new()), None);
-        assert_eq!(
-            app_id("org.example.App".into()).as_deref(),
-            Some("org.example.App")
-        );
-    }
-}
+mod tests;

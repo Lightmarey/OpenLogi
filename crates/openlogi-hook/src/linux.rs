@@ -29,6 +29,7 @@
 
 mod button_debounce;
 mod foreground;
+pub(crate) mod modifiers;
 pub(crate) mod pointer;
 pub(crate) mod probe;
 mod supervisor;

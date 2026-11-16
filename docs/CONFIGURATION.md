@@ -703,7 +703,8 @@ Enable **Crown function mode** to start with Volume, Workspaces and Tabs. A prof
 contains 1–8 functions with stable IDs. Add, rename, remove and reorder them in the
 same panel. Each function binds its rotation, pressed rotation and optional press
 through the existing action catalog, shortcut recorder, application target and
-shell-command fields. The editor validates the input lifecycle before saving.
+shell-command fields. The input lifecycle is validated by the editor, configuration
+loading and the atomic save owner.
 
 The default **Press and release** selector reserves the press action. A press that
 rotates, including movement shorter than one detent, leaves the current function
@@ -712,6 +713,12 @@ bindings. Hold Shift while using the selection input to cycle backwards. A press
 retains the direction captured when it went down, including when Shift is released
 first. The selected function is remembered separately for each device and
 application scope during the agent run. Configuration edits retain function IDs.
+
+On GNOME Wayland, backward selection uses the desktop bridge's modifier snapshot.
+Update and enable the bundled desktop extension to use this with the standard
+device permissions. X11 uses its native modifier query. Other Wayland desktops
+use readable keyboard nodes when available. The agent logs an unavailable
+modifier source. [GNOME desktop bridge](../crates/openlogi-hook/gnome-shell-extension/README.md)
 
 `devices.<key>.crown.default` is the device profile. Each
 `devices.<key>.crown.per_app.<app>` replaces the complete profile for its application.

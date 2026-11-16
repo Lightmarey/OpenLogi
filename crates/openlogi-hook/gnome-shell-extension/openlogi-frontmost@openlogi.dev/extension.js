@@ -6,11 +6,12 @@
 // the focused window is otherwise not visible to ordinary clients.
 //
 // It also keeps Actions Ring surfaces out of GNOME's window animations so
-// their initial pointer coordinates stay valid. No titles, window contents,
-// or input are read. ESM module style; targets GNOME Shell 45+.
+// their initial pointer coordinates stay valid. Crown selection reads only
+// the currently held modifiers. ESM module style; targets GNOME Shell 45+.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Clutter from 'gi://Clutter';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -27,6 +28,12 @@ const DBUS_INTERFACE = `
     <signal name="FocusedWmClassChanged">
       <arg type="s" name="wmClass"/>
     </signal>
+    <method name="GetHeldModifiers">
+      <arg type="b" direction="out" name="shift"/>
+      <arg type="b" direction="out" name="control"/>
+      <arg type="b" direction="out" name="option"/>
+      <arg type="b" direction="out" name="command"/>
+    </method>
   </interface>
 </node>`;
 
@@ -72,6 +79,17 @@ export default class OpenLogiFrontmostExtension extends Extension {
         if (!win)
             return '';
         return win.get_wm_class() || '';
+    }
+
+    GetHeldModifiers() {
+        const [, , mask] = global.get_pointer();
+        const modifiers = Clutter.ModifierType;
+        return [
+            Boolean(mask & modifiers.SHIFT_MASK),
+            Boolean(mask & modifiers.CONTROL_MASK),
+            Boolean(mask & modifiers.MOD1_MASK),
+            Boolean(mask & (modifiers.MOD4_MASK | modifiers.SUPER_MASK)),
+        ];
     }
 
     _emitFocusedWmClassChanged() {

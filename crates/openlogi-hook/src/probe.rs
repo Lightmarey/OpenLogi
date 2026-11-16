@@ -156,16 +156,21 @@ impl PointerProbe {
 /// Snapshot currently held desktop modifiers without capturing or suppressing keys.
 ///
 /// This performs host I/O. Call it from a blocking worker, outside input callbacks.
-/// On Linux it reads available evdev key state, including on native Wayland.
+/// Linux uses GNOME's Shell bridge or X11, with readable keyboard nodes as a
+/// fallback. `None` means no source could answer, independently of held keys.
 #[must_use]
-pub fn held_modifiers() -> KeyModifiers {
-    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub fn held_modifiers() -> Option<KeyModifiers> {
+    #[cfg(target_os = "linux")]
     {
-        platform::held_modifiers()
+        crate::linux::modifiers::held_modifiers()
+    }
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        Some(platform::held_modifiers())
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
-        KeyModifiers::default()
+        None
     }
 }
 

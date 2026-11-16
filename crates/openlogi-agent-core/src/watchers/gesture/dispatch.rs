@@ -12,7 +12,7 @@ use openlogi_core::config::ThumbwheelSensitivity;
 use openlogi_core::scroll::ScrollDelta;
 use openlogi_hid::CapturedInput;
 use openlogi_hid::thumbwheel::WheelResolution;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use self::wheel::{ScrollScale, WheelAccumulators, WheelOutput, WheelRotation};
 use super::GestureOutputs;
@@ -485,9 +485,17 @@ pub(super) async fn selection_modifiers(
         input,
         CapturedInput::ButtonDown(ButtonId::CrownPress) | CapturedInput::CrownTap
     ) {
-        tokio::task::spawn_blocking(openlogi_hook::held_modifiers)
-            .await
-            .unwrap_or_default()
+        match tokio::task::spawn_blocking(openlogi_hook::held_modifiers).await {
+            Ok(Some(modifiers)) => modifiers,
+            Ok(None) => {
+                warn!("desktop modifiers unavailable for Crown backward selection");
+                openlogi_core::config::KeyModifiers::default()
+            }
+            Err(error) => {
+                warn!(%error, "could not read modifiers for Crown selection");
+                openlogi_core::config::KeyModifiers::default()
+            }
+        }
     } else {
         openlogi_core::config::KeyModifiers::default()
     }

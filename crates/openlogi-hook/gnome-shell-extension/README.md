@@ -15,7 +15,9 @@ animation ends, especially near screen edges ([#1210](https://github.com/AprilNE
 Other windows retain their normal animation policy; disabling the extension
 restores GNOME's original policy. The global animation setting is never changed.
 
-No titles, window contents, or input are read, and the extension adds no UI.
+The bridge also reports four held-modifier flags for Crown function selection.
+This reads the compositor's current state and works with standard device
+permissions on native Wayland.
 
 ## D-Bus surface
 
@@ -23,6 +25,7 @@ No titles, window contents, or input are read, and the extension adds no UI.
 - path: `/org/openlogi/Frontmost`
 - method: `GetFocusedWmClass() -> s` (empty string when nothing is focused)
 - signal: `FocusedWmClassChanged(s)` (emitted on each GNOME focus change)
+- `GetHeldModifiers() -> (bbbb)` reports Shift, Control, Alt and Super.
 
 ## Install
 
@@ -30,7 +33,7 @@ No titles, window contents, or input are read, and the extension adds no UI.
 UUID=openlogi-frontmost@openlogi.dev
 DEST="$HOME/.local/share/gnome-shell/extensions/$UUID"
 mkdir -p "$DEST"
-cp metadata.json extension.js ringAnimation.js "$DEST"/
+cp metadata.json ./*.js "$DEST"/
 ```
 
 On Wayland the shell cannot be reloaded in place, so **log out and back in** to
@@ -79,15 +82,45 @@ node --test crates/openlogi-hook/gnome-shell-extension/tests/ringAnimation.test.
 Run that command from the repository root. It does not replace the live GNOME
 placement check above.
 
+The native modifier regression uses the locked GNOME environment and a private
+headless compositor. It injects compositor-owned virtual key events and queries
+the real D-Bus method, including both Shift keys and balanced release.
+
+```sh
+nix develop path:./crates/openlogi-overlay/gnome-shell-extension/tests
+gnome-extensions pack --force --extra-source=ringAnimation.js --out-dir /tmp \
+  crates/openlogi-hook/gnome-shell-extension/openlogi-frontmost@openlogi.dev
+bash crates/openlogi-hook/gnome-shell-extension/tests/run-modifiers.sh \
+  /tmp/openlogi-frontmost@openlogi.dev.shell-extension.zip
+```
+
+The Rust bridge regression additionally covers extension restart, an older
+extension and the distinction between an unavailable source and released keys.
+Build the hook tests in the Rust environment, then run the resulting test binary
+on an isolated session bus.
+
+```sh
+cargo test -p openlogi-hook --no-run --locked --message-format=json \
+  > /tmp/openlogi-hook-test-build.json
+nix develop path:./crates/openlogi-overlay/gnome-shell-extension/tests
+export OPENLOGI_HOOK_TEST_BINARY="$(jq -r \
+  'select(.reason == "compiler-artifact" and .target.name == "openlogi_hook" and .profile.test) | .executable // empty' \
+  /tmp/openlogi-hook-test-build.json | tail -n 1)"
+OPENLOGI_MODIFIER_ISOLATED_BUS=1 dbus-run-session \
+  --config-file="$OPENLOGI_DBUS_SESSION_CONFIG" -- "$OPENLOGI_HOOK_TEST_BINARY" \
+  linux::foreground::gnome_shell::tests::gnome_modifier_snapshots_survive_extension_restart_and_older_versions \
+  --exact --ignored --nocapture
+```
+
 ## Notes
 
-- The `shell-version` list in `metadata.json` covers GNOME 45–50. Newer GNOME
-  releases may need an added entry; the API used here (`Gio.DBusExportedObject`,
-  `global.display.focus_window`, `Meta.Window.get_wm_class`) has been stable
+- The `shell-version` list in `metadata.json` covers GNOME 45–51. Native modifier
+  tests passed on GNOME 50.4 and 51.1. The APIs used here (`Gio.DBusExportedObject`,
+  `global.display.focus_window`, `Meta.Window.get_wm_class`) have been stable
   across these versions.
-- The extension name/UUID and the D-Bus name (`org.openlogi.*`) are placeholders
-  that should track the project's namespace; if they change, update the matching
-  constants in `crates/openlogi-hook/src/linux/gnome_shell.rs`.
+- The extension name/UUID and D-Bus name follow the project's namespace. Keep
+  the proxy in `crates/openlogi-hook/src/linux/foreground/gnome_shell.rs` aligned
+  when those names change.
 - The scoped animation exception uses GNOME Shell's `_shouldAnimateActor` hook
   through its `InjectionManager`. When adding a new shell version, check that
   hook and run the live placement check as well as the policy tests.
