@@ -15,7 +15,7 @@ use super::settings::{
 use crate::binding::{
     Action, ActionRingConfig, Binding, ButtonId, GKeyProfile, GestureDirection, KeypadPage,
 };
-use crate::crown::CrownConfig;
+use crate::crown::{CrownConfig, CrownError, validate_input_binding};
 use crate::device::{Capabilities, DeviceKind, DeviceModelInfo, LightCapabilities};
 use crate::hid::{DisableKeysMask, Dpi, PointerSpeed, ReportRate};
 
@@ -194,13 +194,13 @@ impl LinkOverrides {
 
 /// Settings scoped to a single physical device.
 ///
-/// Deserialization goes through `RawDeviceConfig` (`#[serde(from)]`) so
+/// Deserialization goes through `RawDeviceConfig` (`#[serde(try_from)]`) so
 /// pre-v2 files — which split bindings across `button_bindings` +
 /// `gesture_bindings` — fold into the unified [`Self::bindings`] map. Only
 /// `bindings` is ever serialized, so a migrated file is rewritten to the v2
 /// shape on its next save.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(from = "RawDeviceConfig")]
+#[serde(try_from = "RawDeviceConfig")]
 pub struct DeviceConfig {
     /// Whether OpenLogi manages this device at all. `false` leaves the device
     /// fully native: no capture session (no HID++ diversion of any control)
@@ -420,6 +420,30 @@ pub struct DeviceConfig {
 }
 
 impl DeviceConfig {
+    /// Direct and application bindings share the Crown function constraints.
+    pub(super) fn validate_crown_bindings(&self) -> Result<(), CrownError> {
+        for (button, binding) in self
+            .bindings
+            .iter()
+            .filter(|(button, _)| ButtonId::CROWN.contains(button))
+        {
+            validate_input_binding(*button, binding)?;
+        }
+        for bindings in self
+            .per_app_bindings
+            .values()
+            .chain(std::iter::once(&self.gshift_bindings))
+        {
+            for (button, action) in bindings
+                .iter()
+                .filter(|(button, _)| ButtonId::CROWN.contains(button))
+            {
+                validate_input_binding(*button, &Binding::Single(action.clone()))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Pointer resolution on `route_key`: the link's override when the user
     /// set one there, else the device-level value.
     #[must_use]
@@ -716,8 +740,10 @@ struct RawDeviceConfig {
     crown: CrownConfig,
 }
 
-impl From<RawDeviceConfig> for DeviceConfig {
-    fn from(raw: RawDeviceConfig) -> Self {
+impl TryFrom<RawDeviceConfig> for DeviceConfig {
+    type Error = CrownError;
+
+    fn try_from(raw: RawDeviceConfig) -> Result<Self, Self::Error> {
         let mut bindings = raw.bindings; // the v2 map wins on every key.
 
         // Re-home the legacy flat gesture map under `GestureButton`. This MUST
@@ -747,7 +773,7 @@ impl From<RawDeviceConfig> for DeviceConfig {
             bindings.entry(button).or_insert(Binding::Single(action));
         }
 
-        DeviceConfig {
+        let config = Self {
             enabled: raw.enabled,
             custom_name: raw.custom_name,
             gesture_owner: raw.gesture_owner,
@@ -785,7 +811,9 @@ impl From<RawDeviceConfig> for DeviceConfig {
             gaming_key_mode: raw.gaming_key_mode,
             g_key_profile_names: raw.g_key_profile_names,
             crown: raw.crown,
-        }
+        };
+        config.validate_crown_bindings()?;
+        Ok(config)
     }
 }
 

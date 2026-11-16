@@ -102,6 +102,17 @@ pub enum ConfigError {
         /// The `app:<alias>` profile key.
         key: String,
     },
+    /// Crown inputs in an in-memory edit violate their physical lifecycle.
+    #[error("config at {path}: device {device} has invalid Crown bindings: {source}")]
+    CrownBinding {
+        /// The config file the edit would replace.
+        path: PathBuf,
+        /// The device whose bindings were rejected.
+        device: String,
+        /// The input lifecycle constraint that failed.
+        #[source]
+        source: crate::crown::CrownError,
+    },
 }
 
 /// A loaded config file plus the exact source revision it came from.
@@ -177,6 +188,15 @@ impl ConfigFile {
     /// Returns a [`ConfigError::Write`] with [`io::ErrorKind::WouldBlock`] if
     /// another writer holds the lock, rather than blocking the caller.
     pub fn save(&mut self, config: &Config) -> Result<(), ConfigError> {
+        for (device, settings) in &config.devices {
+            settings
+                .validate_crown_bindings()
+                .map_err(|source| ConfigError::CrownBinding {
+                    path: self.path.clone(),
+                    device: device.clone(),
+                    source,
+                })?;
+        }
         // Atomic replacement must update the target, not replace its symlink.
         // Resolve once so the lock, conflict check, backup and commit use the
         // same target path even if the config link is repointed during a save.

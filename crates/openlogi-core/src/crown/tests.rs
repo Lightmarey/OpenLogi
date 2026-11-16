@@ -212,3 +212,43 @@ functions = [{ id = "volume", name = "Editor volume", icon = "Volume" }]
         Some(app)
     );
 }
+
+#[test]
+fn direct_crown_tables_enforce_the_same_input_constraints_as_functions() {
+    for table in ["bindings", "per_app_bindings.Editor", "gshift_bindings"] {
+        for button in ["CrownRight", "CrownPressedLeft"] {
+            let source = format!(
+                "schema_version = 12\n[devices.craft.{table}]\n{button} = {{ HoldModifier = \"Shift\" }}\n"
+            );
+            let error = toml::from_str::<Config>(&source).unwrap_err();
+            assert!(error.to_string().contains("Crown rotation"), "{error}");
+        }
+    }
+    let source = "schema_version = 12\n[devices.craft.bindings]\nCrownTouch = { HoldModifier = \"Shift\" }\n";
+    toml::from_str::<Config>(source).unwrap();
+}
+
+#[test]
+#[cfg(feature = "fs")]
+fn invalid_direct_crown_bindings_fail_file_load_and_cannot_replace_saved_config() {
+    use crate::config::ConfigEdit;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "schema_version = 12\n[devices.craft.bindings]\nCrownRight = { HoldModifier = \"Shift\" }\n",
+    )
+    .unwrap();
+    Config::load_from_path(&path).unwrap_err();
+    std::fs::write(&path, "schema_version = 12\n").unwrap();
+    let mut edit = ConfigEdit::load(&path).unwrap();
+    edit.config_mut().set_binding(
+        "craft",
+        ButtonId::CrownRight,
+        Action::HoldModifier("Shift".parse().unwrap()).into(),
+    );
+    let before = std::fs::read(&path).unwrap();
+    edit.commit().unwrap_err();
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
