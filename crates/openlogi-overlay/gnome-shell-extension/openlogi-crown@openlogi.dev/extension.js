@@ -14,6 +14,9 @@ const INTERFACE = `<node><interface name="org.openlogi.CrownHud">
 <method name="Hide"/>
 </interface></node>`;
 const SERVICE = 'org.openlogi.CrownHud';
+// GNOME 48 added orientation; GNOME 51 removed the older vertical property.
+const VERTICAL_LAYOUT = 'orientation' in St.BoxLayout.prototype
+    ? {orientation: Clutter.Orientation.VERTICAL} : {vertical: true};
 
 function validate(payload) {
     if (payload.length > 65536)
@@ -127,7 +130,7 @@ export default class CrownHudExtension extends Extension {
             // A mapped actor at (0, 0) can be painted before an idle callback.
             // Resolve its mapped theme while transparent, then position and reveal
             // in the same before-redraw callback; never paint a placeholder frame.
-            this._actor = new St.BoxLayout({vertical: true, visible: false, opacity: 0,
+            this._actor = new St.BoxLayout({...VERTICAL_LAYOUT, visible: false, opacity: 0,
                 reactive: false, can_focus: false, style_class: 'openlogi-crown-hud'});
             Main.layoutManager.addChrome(this._actor, {trackFullscreen: false});
         }
@@ -149,7 +152,7 @@ export default class CrownHudExtension extends Extension {
                     const fill = new St.Widget({style_class: 'openlogi-crown-fill',
                         x_align: Clutter.ActorAlign.START, y_align: Clutter.ActorAlign.FILL,
                         x_expand: true, y_expand: true, reactive: false, can_focus: false, visible: false});
-                    const content = new St.BoxLayout({vertical: true, style_class: 'openlogi-crown-content',
+                    const content = new St.BoxLayout({...VERTICAL_LAYOUT, style_class: 'openlogi-crown-content',
                         x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER,
                         reactive: false, can_focus: false});
                     const symbol = new St.Widget({layout_manager: new Clutter.BinLayout(),

@@ -91,5 +91,6 @@ settings and Chinese translations. Point `OPENLOGI_CROWN_TEST_EXTENSION_DIR` at 
 unpacked extension with compiled schemas and run it through `gjs -m` on an isolated
 Xvfb display with `GSETTINGS_BACKEND=memory`.
 
-Native tests currently cover GNOME 50.4. The declared GNOME 45–49 versions and
+Native compositor tests cover GNOME 50.4. Craft input and HUD initialization were
+also exercised on GNOME 51.1. The declared GNOME 45–49 versions and
 other platforms require their own runtime verification.
