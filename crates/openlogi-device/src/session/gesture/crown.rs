@@ -75,7 +75,9 @@ impl CrownAccum {
         {
             self.tap_contact = TapContact::Consumed;
         }
-        emit_edge(&mut self.touched, touched, ButtonId::CrownTouch, sink);
+        if touched == Some(true) {
+            emit_edge(&mut self.touched, touched, ButtonId::CrownTouch, sink);
+        }
         if pressed == Some(true) {
             emit_edge(&mut self.pressed, pressed, ButtonId::CrownPress, sink);
         }
@@ -106,8 +108,9 @@ impl CrownAccum {
                 let _ = sink.send(CapturedInput::ButtonPulse(button));
             }
         }
-        // Publish final movement under the current hold before releasing it,
-        // even when that movement has not crossed a detent.
+        // Both contact holds include the report's final movement, even when
+        // it has not crossed a detent. Release their output only afterwards.
+        emit_edge(&mut self.touched, touched, ButtonId::CrownTouch, sink);
         emit_edge(&mut self.pressed, pressed, ButtonId::CrownPress, sink);
         if event.gesture == CrownGesture::Tap && matches!(self.tap_contact, TapContact::Armed) {
             self.tap_contact = TapContact::Pending;
@@ -240,14 +243,46 @@ mod tests {
         assert_eq!(
             drain(&mut inputs),
             [
-                CapturedInput::ButtonUp(ButtonId::CrownTouch),
                 CapturedInput::CrownRotation {
                     slots: 1,
                     ratchets: 0
                 },
+                CapturedInput::ButtonUp(ButtonId::CrownTouch),
                 CapturedInput::ButtonUp(ButtonId::CrownPress),
             ]
         );
+    }
+
+    #[test]
+    fn final_rotation_precedes_touch_release_with_or_without_a_press() {
+        for pressed in [false, true] {
+            for ratcheted in [false, true] {
+                for direction in [-1, 1] {
+                    let (sink, mut inputs) = mpsc::unbounded_channel();
+                    let mut crown = CrownAccum::default();
+                    crown.on_event(update(0, 0, 1, u8::from(pressed), 0), ratcheted, &sink);
+                    drain(&mut inputs);
+                    crown.on_event(update(direction, direction, 3, 5, 0), ratcheted, &sink);
+                    let mut expected = vec![
+                        CapturedInput::CrownRotation {
+                            slots: direction,
+                            ratchets: direction,
+                        },
+                        CapturedInput::ButtonPulse(match (pressed, direction > 0) {
+                            (false, false) => ButtonId::CrownLeft,
+                            (false, true) => ButtonId::CrownRight,
+                            (true, false) => ButtonId::CrownPressedLeft,
+                            (true, true) => ButtonId::CrownPressedRight,
+                        }),
+                        CapturedInput::ButtonUp(ButtonId::CrownTouch),
+                    ];
+                    if pressed {
+                        expected.push(CapturedInput::ButtonUp(ButtonId::CrownPress));
+                    }
+                    assert_eq!(drain(&mut inputs), expected);
+                }
+            }
+        }
     }
 
     #[test]
