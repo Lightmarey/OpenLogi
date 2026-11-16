@@ -181,6 +181,7 @@ impl InputDispatcher {
 
     pub(super) fn retire_crown_mode(&mut self, session: &HidppSessionId) {
         self.crown_modes.remove(&session.epoch());
+        self.crown.retire(session);
         self.crown_confirmed.remove(&session.epoch());
     }
 
@@ -299,15 +300,22 @@ impl InputDispatcher {
         input: CapturedInput,
         modifiers: openlogi_core::config::KeyModifiers,
     ) -> bool {
-        if let CapturedInput::CrownModeApplied { mode, request } = input {
-            if self
-                .crown_modes
-                .get(&session.epoch())
-                .is_none_or(|handle| handle.accepts(request))
-            {
-                self.crown_confirmed.insert(session.epoch(), mode);
+        match input {
+            CapturedInput::CrownModeApplied { mode, request } => {
+                if self
+                    .crown_modes
+                    .get(&session.epoch())
+                    .is_none_or(|handle| handle.accepts(request))
+                {
+                    self.crown_confirmed.insert(session.epoch(), mode);
+                }
+                return true;
             }
-            return true;
+            CapturedInput::CrownReady(capabilities) => {
+                self.crown.set_capabilities(session, capabilities);
+                return true;
+            }
+            _ => {}
         }
         let handled = self
             .crown
@@ -426,6 +434,7 @@ impl InputDispatcher {
             }
             CapturedInput::CrownTap
             | CapturedInput::CrownRotation(_)
+            | CapturedInput::CrownReady(_)
             | CapturedInput::CrownModeApplied { .. } => {}
         }
     }
@@ -461,6 +470,24 @@ impl InputDispatcher {
             f64::from(motion.slots) * motion.resolution.native_per_increment()
         };
         let distance = native * settings.sensitivity.multiplier();
+        if plan
+            .crown
+            .as_ref()
+            .is_some_and(|policy| policy.application.is_some())
+        {
+            if let Some(application) = self.crown.application(parent) {
+                let amount = if settings.inverted {
+                    -distance
+                } else {
+                    distance
+                };
+                self.outputs.applications.input(
+                    application,
+                    crate::applications::crown_motion_for(motion, amount, ratcheted),
+                );
+            }
+            return;
+        }
         let steps = if ratcheted {
             motion.ratchets
         } else {

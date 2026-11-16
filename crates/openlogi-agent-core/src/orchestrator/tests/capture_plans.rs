@@ -229,6 +229,84 @@ fn app_switch_republishes_capture_plans() {
     assert_eq!(published_back_binding(&orch), Some(Action::Undo));
 }
 
+#[tokio::test]
+async fn application_tools_keep_the_matched_scope_and_never_replace_saved_functions() {
+    use crate::applications::tests::{capabilities, context, next, provider, tools};
+    use crate::applications::{ApplicationServer, ControlScope};
+    use openlogi_core::crown::CrownProfile;
+    use openlogi_sdk::{ControlId, DeactivationReason, SelectionInput, ServerMessage};
+    use openlogi_sdk::{client::Client, transport::Endpoint};
+    let directory = tempfile::tempdir().unwrap();
+    let endpoint = Endpoint::at(directory.path().join("sdk.sock"));
+    let info = provider("parameters");
+    let mut saved = CrownProfile::default();
+    saved.set_enabled(true);
+    saved.set_provider(Some(info.id.clone()));
+    let mut config = Config::default();
+    config
+        .devices
+        .entry("a".into())
+        .or_default()
+        .crown
+        .per_app
+        .insert("exe:zen.exe".into(), saved.clone());
+    let mut orch = orchestrator(config);
+    let mut craft = dev("a", 1, true);
+    craft.kind = DeviceKind::Keyboard;
+    orch.devices = vec![craft];
+    orch.set_current_app(Some(ForegroundApp::unnamed(r"c:\zen-v3\zen.exe".into())));
+    let offline = orch.shared.capture_plans.borrow().plans()[0].clone();
+    assert_eq!(
+        offline.dispatch.crown.as_ref().unwrap().profile.functions()[0]
+            .id()
+            .as_ref(),
+        "volume"
+    );
+    let host = Arc::clone(&orch.shared.applications);
+    let _server = ApplicationServer::start_at(Arc::clone(&host), &endpoint).unwrap();
+    let mut client = Client::connect_at(&endpoint, info.clone()).await.unwrap();
+    client.set_context(1, Some(tools(50))).await.unwrap();
+    let context = context(&host, &info.id, 1).await;
+    orch.refresh_application_contexts();
+    let online = orch.shared.capture_plans.borrow().plans()[0].clone();
+    assert_eq!(online.target, offline.target);
+    let policy = online.dispatch.crown.as_ref().unwrap();
+    assert_eq!(policy.scope.as_deref(), Some("exe:zen.exe"));
+    assert_eq!(policy.profile.functions()[0].id().as_ref(), "zoom");
+    assert_eq!(orch.config.devices["a"].crown.per_app["exe:zen.exe"], saved);
+    let session = host
+        .activate(
+            ControlScope::new("a".into(), policy.scope.clone()),
+            &context,
+            capabilities(),
+            ControlId::new("zoom".into()).unwrap(),
+            SelectionInput::Press,
+        )
+        .unwrap();
+    assert!(matches!(
+        next(&mut client).await,
+        ServerMessage::Activated(_)
+    ));
+    orch.set_current_app(Some(ForegroundApp::unnamed("chat".into())));
+    assert!(
+        matches!(next(&mut client).await, ServerMessage::Deactivated { session: ended, reason: DeactivationReason::FocusChanged } if ended == session.id())
+    );
+    orch.set_current_app(Some(ForegroundApp::unnamed(r"c:\zen-v3\zen.exe".into())));
+    let mut changed = host.subscribe();
+    drop(client);
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while host.resolve(&info.id).is_some() {
+            changed.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    orch.refresh_application_contexts();
+    let restored = orch.shared.capture_plans.borrow().plans()[0].clone();
+    assert_eq!(restored.target, offline.target);
+    assert_eq!(restored.dispatch.crown.unwrap().profile, saved);
+}
+
 #[test]
 fn app_switch_cancels_held_buttons_only_when_a_per_app_override_is_involved() {
     let mut config = Config::default();

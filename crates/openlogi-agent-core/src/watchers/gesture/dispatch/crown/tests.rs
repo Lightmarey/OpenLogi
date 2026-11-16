@@ -28,6 +28,7 @@ fn plan(scope: Option<&str>) -> DispatchPlan {
         crown: Some(CrownDispatch {
             scope: scope.map(str::to_owned),
             profile,
+            application: None,
         }),
     }
 }
@@ -50,7 +51,13 @@ async fn crown_motion_uses_the_confirmation_boundary_in_the_ordered_input_stream
         VerticalScrollSensitivity::DEFAULT,
     )))
     .unwrap();
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        Arc::default(),
+        Arc::default(),
+    );
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let parent = HidppSessionId::new("craft");
     let policy = plan(None);
@@ -103,7 +110,13 @@ async fn a_replaced_function_session_uses_the_raw_current_press_state() {
         VerticalScrollSensitivity::DEFAULT,
     )))
     .unwrap();
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        Arc::default(),
+        Arc::default(),
+    );
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let parent = HidppSessionId::new("craft");
     let mut policy = plan(Some("editor"));
@@ -128,6 +141,183 @@ async fn a_replaced_function_session_uses_the_raw_current_press_state() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the ordered Craft stream and local fallback must share one capture and action runtime"
+)]
+async fn crown_application_inputs_preserve_motion_edges_and_restore_local_actions() {
+    use crate::applications::tests::{context, next, provider, tools};
+    use crate::applications::{
+        ApplicationHost, ApplicationServer, ControlScope, crown_profile_for,
+    };
+    use openlogi_sdk::{ControlInput, RotationPhase, RotationResolution, ServerMessage};
+    use openlogi_sdk::{client::Client, transport::Endpoint};
+    let directory = tempfile::tempdir().unwrap();
+    let endpoint = Endpoint::at(directory.path().join("sdk.sock"));
+    let host = Arc::new(ApplicationHost::default());
+    let _server = ApplicationServer::start_at(Arc::clone(&host), &endpoint).unwrap();
+    let provider = provider("parameters");
+    let mut client = Client::connect_at(&endpoint, provider.clone())
+        .await
+        .unwrap();
+    client.set_context(1, Some(tools(50))).await.unwrap();
+    let context = context(&host, &provider.id, 1).await;
+    let (actions, mut buttons, events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let display = Arc::new(crate::crown::CrownDisplay::with_applications(Arc::clone(
+        &host,
+    )));
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        display.clone(),
+        Arc::clone(&host),
+    );
+    let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
+    let parent = HidppSessionId::new("craft");
+    let mut policy = touch_plan(Some("editor"));
+    let fallback = policy.clone();
+    dispatcher.dispatch(&parent, &fallback, CapturedInput::CrownTap);
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "workspaces"
+    );
+    dispatcher.cancel_session(&parent);
+    let crown = policy.crown.as_mut().unwrap();
+    crown.profile = crown_profile_for(&crown.profile, &context).unwrap();
+    crown.application = Some(context.clone());
+    host.reconcile(
+        [(
+            ControlScope::new("craft".into(), Some("editor".into())),
+            context,
+        )]
+        .into(),
+    );
+    dispatcher.dispatch(
+        &parent,
+        &policy,
+        CapturedInput::CrownReady(openlogi_sdk::ControlCapabilities {
+            kind: openlogi_sdk::ControlKind::Rotary,
+            features: openlogi_sdk::ControlFeatures::all(),
+            resolution: RotationResolution::new(1, 4),
+        }),
+    );
+    dispatcher.dispatch(
+        &parent,
+        &policy,
+        CapturedInput::ButtonDown(ButtonId::CrownTouch),
+    );
+    assert!(matches!(
+        next(&mut client).await,
+        ServerMessage::Activated(_)
+    ));
+    assert!(matches!(
+        next(&mut client).await,
+        ServerMessage::Input {
+            event: ControlInput::Touch { down: true },
+            ..
+        }
+    ));
+    dispatcher.dispatch(
+        &parent,
+        &policy,
+        CapturedInput::ButtonDown(ButtonId::CrownPress),
+    );
+    assert!(matches!(
+        next(&mut client).await,
+        ServerMessage::Input {
+            event: ControlInput::Press {
+                down: true,
+                reserved: false
+            },
+            ..
+        }
+    ));
+    let mut motion = openlogi_hid::crown::CrownMotion::new(2, 0, false);
+    motion.resolution = RotationResolution::new(1, 4);
+    motion.phase = openlogi_hid::crown::RotationState::Start;
+    motion.pressed = true;
+    dispatcher.dispatch(&parent, &policy, CapturedInput::CrownRotation(motion));
+    let ServerMessage::Input {
+        event: ControlInput::Rotation(rotation),
+        ..
+    } = next(&mut client).await
+    else {
+        panic!("raw motion");
+    };
+    assert_eq!(
+        (
+            rotation.amount,
+            rotation.raw,
+            rotation.detents,
+            rotation.phase,
+            rotation.pressed
+        ),
+        (0.5, 2, 0, RotationPhase::Start, true)
+    );
+    motion.slots = 1;
+    motion.phase = openlogi_hid::crown::RotationState::Stop;
+    dispatcher.dispatch(&parent, &policy, CapturedInput::CrownRotation(motion));
+    dispatcher.dispatch(
+        &parent,
+        &policy,
+        CapturedInput::ButtonUp(ButtonId::CrownPress),
+    );
+    assert!(
+        matches!(next(&mut client).await, ServerMessage::Input { event: ControlInput::Rotation(rotation), .. } if rotation.raw == 1 && rotation.phase == RotationPhase::Stop)
+    );
+    assert!(matches!(
+        next(&mut client).await,
+        ServerMessage::Input {
+            event: ControlInput::Press { down: false, .. },
+            ..
+        }
+    ));
+    dispatcher.dispatch(&parent, &policy, CapturedInput::CrownTap);
+    assert!(matches!(
+        next(&mut client).await,
+        ServerMessage::Input {
+            event: ControlInput::Tap { reserved: true },
+            ..
+        }
+    ));
+    assert!(
+        matches!(next(&mut client).await, ServerMessage::Selected { tool, .. } if tool.as_ref() == "command")
+    );
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "command"
+    );
+    dispatcher.cancel_session(&parent);
+    assert!(matches!(
+        next(&mut client).await,
+        ServerMessage::Deactivated { .. }
+    ));
+    dispatcher.dispatch(
+        &parent,
+        &fallback,
+        CapturedInput::CrownRotation(openlogi_hid::crown::CrownMotion::new(6, 1, true)),
+    );
+    let ButtonRuntimeEvent::Started(press) = events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("local fallback");
+    };
+    assert_eq!(press.start_action(), Some(&Action::NextDesktop));
+    assert!(matches!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        ButtonRuntimeEvent::Ended { .. }
+    ));
+    assert!(buttons.shutdown());
+    assert!(events.try_iter().next().is_none());
+    scroll.shutdown();
+}
+
+#[tokio::test]
 async fn press_selects_on_release_without_firing_a_binding_and_rotation_consumes_selection() {
     let (actions, mut buttons, events) = test_dispatcher();
     let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
@@ -136,7 +326,13 @@ async fn press_selects_on_release_without_firing_a_binding_and_rotation_consumes
     )))
     .unwrap();
     let display = Arc::new(crate::crown::CrownDisplay::default());
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), display.clone());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        display.clone(),
+        Arc::default(),
+    );
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let session = HidppSessionId::new("craft");
     let mut policy = plan(None);
@@ -227,7 +423,13 @@ async fn tap_selects_once_rotation_uses_selected_function_and_profiles_remember_
     )))
     .unwrap();
     let display = Arc::new(crate::crown::CrownDisplay::default());
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), display.clone());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        display.clone(),
+        Arc::default(),
+    );
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let session = HidppSessionId::new("craft");
     let default = touch_plan(None);
@@ -295,7 +497,13 @@ async fn press_release_is_balanced_and_stale_cancel_cannot_hide_a_replacement() 
     )))
     .unwrap();
     let display = Arc::new(crate::crown::CrownDisplay::default());
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), display.clone());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        display.clone(),
+        Arc::default(),
+    );
     let mut dispatcher = CrownFunctions::default();
     let old = HidppSessionId::new("craft");
     let current = HidppSessionId::new("craft");
@@ -364,7 +572,13 @@ async fn crown_thresholds_and_held_output_use_balanced_upstream_lifecycles() {
         VerticalScrollSensitivity::DEFAULT,
     )))
     .unwrap();
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        Arc::default(),
+        Arc::default(),
+    );
     let mut dispatcher = CrownFunctions::default();
     let mut policy = touch_plan(None);
     let profile = &mut policy.crown.as_mut().unwrap().profile;
@@ -450,7 +664,13 @@ async fn shift_selection_moves_backwards_and_keeps_press_time_direction() {
     )))
     .unwrap();
     let display = Arc::new(crate::crown::CrownDisplay::default());
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), display.clone());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        display.clone(),
+        Arc::default(),
+    );
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let session = HidppSessionId::new("craft");
     let policy = plan(None);
@@ -500,7 +720,13 @@ async fn starter_functions_dispatch_real_rotation_actions() {
         VerticalScrollSensitivity::DEFAULT,
     )))
     .unwrap();
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        Arc::default(),
+        Arc::default(),
+    );
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let session = HidppSessionId::new("craft");
     let policy = plan(None);
@@ -555,7 +781,13 @@ async fn crown_fractional_steps_follow_speed_and_inversion_and_expire_with_the_f
         VerticalScrollSensitivity::DEFAULT,
     )))
     .unwrap();
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        Arc::default(),
+        Arc::default(),
+    );
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let session = HidppSessionId::new("craft");
     let mut policy = plan(None);
@@ -614,7 +846,13 @@ async fn direct_crown_rotation_honors_gshift() {
         VerticalScrollSensitivity::DEFAULT,
     )))
     .unwrap();
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        Arc::default(),
+        Arc::default(),
+    );
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let parent = HidppSessionId::new("craft");
     let mut policy = plan(None);
@@ -656,7 +894,13 @@ async fn direct_crown_fractional_steps_do_not_cross_binding_layers() {
         VerticalScrollSensitivity::DEFAULT,
     )))
     .unwrap();
-    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        Arc::default(),
+        Arc::default(),
+    );
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let parent = HidppSessionId::new("craft");
     let mut policy = plan(None);
@@ -729,7 +973,13 @@ async fn reconnect_cancels_crown_output_and_reconfirms_the_current_request() {
             VerticalScrollSensitivity::DEFAULT,
         )))
         .unwrap();
-        let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+        let outputs = GestureOutputs::new(
+            actions,
+            scroll.input(),
+            Arc::default(),
+            Arc::default(),
+            Arc::default(),
+        );
         let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
         let parent = HidppSessionId::new("craft");
         let mut policy = touch_plan(None);

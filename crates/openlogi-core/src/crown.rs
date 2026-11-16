@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::app::profile_key_for;
+use crate::application_control::ProviderId;
 use crate::binding::{Action, ActionRingIcon, Binding, ButtonId};
 use crate::parameter::ParameterState;
 use crate::rotary::{RotarySettings, TactileMode};
@@ -354,6 +355,7 @@ pub struct CrownProfile {
     selection_trigger: CrownSelectionTrigger,
     feel: TactileMode,
     rotation: RotarySettings,
+    provider: Option<ProviderId>,
 }
 
 #[derive(Deserialize)]
@@ -368,6 +370,8 @@ struct RawProfile {
     feel: TactileMode,
     #[serde(default)]
     rotation: RotarySettings,
+    #[serde(default)]
+    provider: Option<ProviderId>,
 }
 
 impl TryFrom<RawProfile> for CrownProfile {
@@ -378,6 +382,7 @@ impl TryFrom<RawProfile> for CrownProfile {
         profile.set_selection_trigger(raw.selection_trigger);
         profile.feel = raw.feel;
         profile.rotation = raw.rotation;
+        profile.provider = raw.provider;
         Ok(profile)
     }
 }
@@ -398,6 +403,7 @@ impl CrownProfile {
             selection_trigger: CrownSelectionTrigger::default(),
             feel: TactileMode::default(),
             rotation: RotarySettings::default(),
+            provider: None,
         })
     }
 
@@ -445,6 +451,17 @@ impl CrownProfile {
         self.rotation = settings;
     }
 
+    /// Explicit application provider, with saved functions retained as fallback.
+    #[must_use]
+    pub const fn provider(&self) -> Option<&ProviderId> {
+        self.provider.as_ref()
+    }
+
+    /// Select a provider independently of its current connection state.
+    pub fn set_provider(&mut self, provider: Option<ProviderId>) {
+        self.provider = provider;
+    }
+
     /// Controls that remain available for action bindings in this profile.
     pub fn binding_controls(&self) -> impl Iterator<Item = CrownControl> {
         CrownControl::ALL.into_iter().filter(|control| {
@@ -459,6 +476,7 @@ impl CrownProfile {
         replacement.selection_trigger = self.selection_trigger;
         replacement.feel = self.feel;
         replacement.rotation = self.rotation;
+        replacement.provider.clone_from(&self.provider);
         *self = replacement;
         Ok(())
     }
@@ -519,6 +537,7 @@ impl Default for CrownProfile {
             selection_trigger: CrownSelectionTrigger::default(),
             feel: TactileMode::default(),
             rotation: RotarySettings::default(),
+            provider: None,
         }
     }
 }

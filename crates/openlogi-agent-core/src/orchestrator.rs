@@ -132,6 +132,8 @@ impl AgentDevice {
 /// consumers receive only read capabilities through this type.
 #[derive(Clone)]
 pub struct SharedHandles {
+    /// Native application registration and parameter leases.
+    pub applications: Arc<crate::applications::ApplicationHost>,
     /// Backend identity, I/O gate, channel pool, and inventory source shared by
     /// every hardware-dependent agent service.
     hardware: HardwareContext,
@@ -894,6 +896,7 @@ impl Orchestrator {
             hardware.device_io(),
         );
         let shared = SharedHandles {
+            applications: Arc::default(),
             device_io: hardware.device_io(),
             channel_pool: hardware.channel_pool(),
             hardware,
@@ -1429,6 +1432,11 @@ impl Orchestrator {
         publish_arc_if_changed(&self.capture_plans_tx, self.capture_publication());
     }
 
+    /// Re-resolve dynamic application tools after a provider or context changes.
+    pub fn refresh_application_contexts(&self) {
+        self.publish_capture_plans();
+    }
+
     /// Rewrite the per-device DPI-cycle map for every online device,
     /// preserving a device's live cycle index (and lazily discovered
     /// capabilities) across rebuilds whose presets did not change — a config
@@ -1573,6 +1581,7 @@ impl Orchestrator {
             }
             plans.push(plan);
         }
+        crate::applications::apply_crown_contexts(&self.shared.applications, &mut plans);
         CapturePublication::new(plans, routes)
     }
 

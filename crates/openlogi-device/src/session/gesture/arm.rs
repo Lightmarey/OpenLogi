@@ -126,6 +126,7 @@ pub(super) struct ArmedCrown {
     pub(super) crown: Crown,
     pub(super) ratcheted: bool,
     pub(super) resolution: openlogi_core::rotary::RotationResolution,
+    pub(super) capabilities: openlogi_core::application_control::ControlCapabilities,
 }
 
 pub(super) struct ArmedThumbwheel {
@@ -634,16 +635,41 @@ async fn arm_crown(
     device_index: u8,
     armed: &mut ArmedControls,
 ) -> Result<(), CaptureError> {
+    use openlogi_core::application_control::{ControlCapabilities, ControlFeatures, ControlKind};
+
     let Some(info) = device.root().get_feature(crown::FEATURE_ID).await? else {
         return Ok(());
     };
     let crown = Crown::new(Arc::clone(channel), device_index, info.index);
     let mode = crown.get_mode().await?;
     let info = crown.get_info().await?;
+    let resolution = openlogi_core::rotary::RotationResolution::new(info.ratchets, info.slots);
+    let mut features = ControlFeatures::empty();
+    features.set(
+        ControlFeatures::TOUCH,
+        info.sensors
+            .contains(hidpp::feature::crown::CrownSensorCapabilities::TOUCH),
+    );
+    features.set(
+        ControlFeatures::PRESS,
+        info.controls
+            .contains(hidpp::feature::crown::CrownControlCapabilities::BUTTON),
+    );
+    features.set(ControlFeatures::DETENTS, info.ratchets != 0);
+    features.set(
+        ControlFeatures::TACTILE,
+        info.controls
+            .contains(hidpp::feature::crown::CrownControlCapabilities::MECHANIZED_RATCHET),
+    );
     let crown = armed.crown.insert(ArmedCrown {
         crown,
         ratcheted: mode.ratchet_mode == RatchetMode::Ratchet,
-        resolution: openlogi_core::rotary::RotationResolution::new(info.ratchets, info.slots),
+        resolution,
+        capabilities: ControlCapabilities {
+            kind: ControlKind::Rotary,
+            features,
+            resolution,
+        },
     });
     crown
         .crown

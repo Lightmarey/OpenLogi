@@ -1550,7 +1550,7 @@ fn crown_rotary_configuration_is_appended_and_round_trips() {
     );
     let mut profile = CrownProfile::new(true, vec![function]).unwrap();
     profile.set_feel(TactileMode::Smooth);
-    assert_wire(&profile, "0101017801580f0002960100016400");
+    assert_wire(&profile, "0101017801580f000296010001640000");
     assert_wire(&openlogi_core::hid::HidppOperation::ReadCrown, "21");
     assert_wire(&openlogi_core::hid::HidppOperation::WriteCrown, "22");
 }
@@ -1576,4 +1576,39 @@ fn crown_input_names_are_wire_stable() {
 fn brightness_action_indices() {
     assert_wire(&openlogi_core::binding::Action::BrightnessUp, "41");
     assert_wire(&openlogi_core::binding::Action::BrightnessDown, "42");
+}
+
+#[test]
+fn application_directory_rpc_and_provider_references_are_appended() {
+    use openlogi_core::application_control::{ProviderDescriptor, ProviderId};
+    assert_wire(
+        &AgentRequest::ObserveApplicationProviders { since: 7 },
+        "3b07",
+    );
+    assert_wire(
+        &AgentResponse::ObserveApplicationProviders(
+            openlogi_ipc::ApplicationProvidersObservation::new(
+                7,
+                vec![ProviderDescriptor::new(
+                    ProviderId::new("demo".into()).unwrap(),
+                    "Demo".into(),
+                )],
+            ),
+        ),
+        "3b07010464656d6f0444656d6f",
+    );
+    let mut profile = openlogi_core::crown::CrownProfile::new(
+        true,
+        vec![
+            openlogi_core::crown::CrownFunction::new(
+                openlogi_core::crown::CrownFunctionId::new("x".into()).unwrap(),
+                "X",
+                ActionRingIcon::Volume,
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+    profile.set_provider(Some(ProviderId::new("preview".into()).unwrap()));
+    assert_wire(&profile, "0101017801580f0000640000006400010770726576696577");
 }

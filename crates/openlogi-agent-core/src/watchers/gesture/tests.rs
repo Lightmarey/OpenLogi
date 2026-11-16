@@ -203,6 +203,7 @@ async fn recovery_manager_waits_for_control_events_and_shutdown_between_retries(
                 actions.dispatcher(),
                 scroll.input(),
                 Arc::default(),
+                Arc::default(),
                 Arc::default()
             ),
             shutdown,
@@ -988,6 +989,7 @@ async fn a_pointer_only_plan_refresh_keeps_a_held_gesture() {
     let mut dispatcher = InputDispatcher::new(GestureOutputs::new(
         actions.dispatcher(),
         scroll.input(),
+        Arc::default(),
         Arc::default(),
         Arc::default(),
     ));

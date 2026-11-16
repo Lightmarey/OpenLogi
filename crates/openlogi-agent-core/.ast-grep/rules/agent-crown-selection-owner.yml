@@ -1,0 +1,11 @@
+id: agent-crown-selection-owner
+language: rust
+severity: error
+message: CrownFunctions::ProfileKey owns local/provider selection namespaces. Use ProfileKey::new.
+files:
+  - crates/openlogi-agent-core/src/watchers/gesture/dispatch/crown.rs
+  - crates/openlogi-agent-core/src/watchers/gesture/dispatch/crown/**/*.rs
+rule:
+  any:
+    - pattern: $STATE.remembered.get(&($DEVICE, $SCOPE))
+    - pattern: let profile_key = ($DEVICE, $SCOPE);

@@ -1019,6 +1019,30 @@ pub struct CrownObservation {
     pub hud: Option<CrownHud>,
 }
 
+/// Read-only directory of currently registered native application providers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ApplicationProvidersObservation {
+    /// Pass back to [`Agent::observe_application_providers`].
+    pub generation: Generation,
+    /// Online providers in stable ID order. Offline references remain in config.
+    pub providers: Vec<openlogi_core::application_control::ProviderDescriptor>,
+}
+
+impl ApplicationProvidersObservation {
+    /// Construct a complete level-triggered provider observation.
+    #[must_use]
+    pub const fn new(
+        generation: Generation,
+        providers: Vec<openlogi_core::application_control::ProviderDescriptor>,
+    ) -> Self {
+        Self {
+            generation,
+            providers,
+        }
+    }
+}
+
 impl CrownObservation {
     /// Construct an observation with its generation and complete display state.
     #[must_use]
@@ -1330,4 +1354,6 @@ pub trait Agent {
 
     /// Observe the agent-owned Crown HUD state.
     async fn observe_crown(since: Generation) -> CrownObservation;
+    /// Observe registered native application providers through the shared observer.
+    async fn observe_application_providers(since: Generation) -> ApplicationProvidersObservation;
 }

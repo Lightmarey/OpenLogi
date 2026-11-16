@@ -1,0 +1,12 @@
+id: application-parameter-owner
+language: rust
+severity: error
+message: ApplicationHost owns connection-scoped parameter values. Read them through an ActiveSession.
+files:
+  - crates/openlogi-agent-core/**/*.rs
+ignores:
+  - crates/openlogi-agent-core/src/applications/mod.rs
+rule:
+  pattern:
+    context: "struct Cache { values: BTreeMap<ControlId, ParameterState> }"
+    selector: field_declaration

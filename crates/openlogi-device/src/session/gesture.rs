@@ -132,6 +132,8 @@ pub enum CapturedInput {
     /// Raw signed Crown movement before discrete action pulses are expanded.
     /// Preserves movement between ratchets without treating it as a discrete pulse.
     CrownRotation(crate::crown::CrownMotion),
+    /// Real Crown capabilities, admitted once before this capture's inputs.
+    CrownReady(openlogi_core::application_control::ControlCapabilities),
     /// Confirmed tactile mode, ordered with reports on the capture input channel.
     CrownModeApplied {
         /// Physical mode confirmed by a readback.

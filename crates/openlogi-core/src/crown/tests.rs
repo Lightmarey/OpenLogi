@@ -28,6 +28,30 @@ fn old_profiles_load_with_native_rotation_and_new_settings_survive_edits() {
 }
 
 #[test]
+fn offline_provider_references_survive_function_edits_and_old_profiles_remain_local() {
+    let mut profile = CrownProfile::default();
+    assert!(profile.provider().is_none());
+    let provider = crate::application_control::ProviderId::new("example-preview".into()).unwrap();
+    profile.set_provider(Some(provider.clone()));
+    profile
+        .replace_functions(profile.functions().to_vec())
+        .unwrap();
+    let saved = toml::to_string(&profile).unwrap();
+    let loaded: CrownProfile = toml::from_str(&saved).unwrap();
+    assert_eq!(loaded.provider(), Some(&provider));
+    assert_eq!(loaded.functions(), CrownProfile::default().functions());
+    toml::from_str::<CrownProfile>(&saved.replace("example-preview", "invalid provider"))
+        .unwrap_err();
+    let old = saved.replace("provider = \"example-preview\"\n", "");
+    assert!(
+        toml::from_str::<CrownProfile>(&old)
+            .unwrap()
+            .provider()
+            .is_none()
+    );
+}
+
+#[test]
 fn feedback_tracks_actions_rather_than_editable_names_and_icons() {
     let mut function = CrownProfile::default().functions()[0].clone();
     assert_eq!(function.feedback(), Some(CrownFeedback::SystemVolume));

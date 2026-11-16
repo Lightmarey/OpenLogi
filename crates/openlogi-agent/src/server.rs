@@ -532,6 +532,14 @@ impl Agent for AgentServer {
         self.crown.observe(since).await
     }
 
+    async fn observe_application_providers(
+        self,
+        _: Context,
+        since: Generation,
+    ) -> openlogi_ipc::ApplicationProvidersObservation {
+        self.shared.applications.observe_providers(since).await
+    }
+
     async fn observe_action_ring(self, _: Context, since: Generation) -> RingObservation {
         self.action_ring.observe(since).await
     }

@@ -11,6 +11,7 @@
 //! crate is what keeps the GUI from linking `openlogi-hid`/`hidpp`/`async-hid`.
 
 pub mod action_ring;
+pub mod applications;
 pub mod backlight_overlay;
 pub mod capture_plan;
 pub mod crown;

@@ -57,6 +57,10 @@ async fn wake_keeps_crown_calibration() {
     let capture = calibrated_crown_capture().await;
     let (sink, mut inputs) = mpsc::unbounded_channel();
     let handler = capture.report_handler(0xff, sink);
+    assert!(matches!(
+        inputs.try_recv().unwrap(),
+        CapturedInput::CrownReady(_)
+    ));
     handler(&crown_report(6, 0, 0));
     let CapturedInput::CrownRotation(before) = inputs.try_recv().unwrap() else {
         panic!("motion");
@@ -79,6 +83,10 @@ async fn wake_cancels_crown_holds() {
     let capture = calibrated_crown_capture().await;
     let (sink, mut inputs) = mpsc::unbounded_channel();
     let handler = capture.report_handler(0xff, sink);
+    assert!(matches!(
+        inputs.try_recv().unwrap(),
+        CapturedInput::CrownReady(_)
+    ));
     handler(&crown_report(0, 1, 1));
     let down = std::iter::from_fn(|| inputs.try_recv().ok()).collect::<Vec<_>>();
     assert!(down.contains(&CapturedInput::ButtonDown(ButtonId::CrownPress)));
@@ -153,6 +161,32 @@ async fn crown_capture_changes_only_reporting_and_restores_even_an_old_diversion
     .await
     .unwrap();
     assert!(armed.crown.as_ref().is_some_and(|crown| crown.ratcheted));
+    let (sink, mut inputs) = tokio::sync::mpsc::unbounded_channel();
+    let _reports = crate::session::gesture::crown::report_handler(
+        armed.crown.as_ref(),
+        Arc::default(),
+        0xff,
+        sink,
+    );
+    let CapturedInput::CrownReady(capabilities) = inputs.try_recv().unwrap() else {
+        panic!("source discovery precedes physical inputs");
+    };
+    assert!(
+        capabilities
+            .features
+            .contains(openlogi_core::application_control::ControlFeatures::TACTILE)
+    );
+    assert!(
+        capabilities
+            .features
+            .contains(openlogi_core::application_control::ControlFeatures::TOUCH)
+    );
+    assert!(
+        !capabilities
+            .features
+            .contains(openlogi_core::application_control::ControlFeatures::PRESS)
+    );
+    assert_eq!(capabilities.resolution, WheelResolution::new(20, 120));
     armed.rearm().await;
     let pending = armed
         .into_pending(&shared)

@@ -240,6 +240,12 @@ impl Stamped for CrownObservation {
     }
 }
 
+impl Stamped for crate::ApplicationProvidersObservation {
+    fn generation(&self) -> Generation {
+        self.generation
+    }
+}
+
 /// One connection's view of the agent's generation counter.
 ///
 /// Starts at 0 — "I have seen nothing" — so the first answer is the agent's
@@ -375,6 +381,21 @@ impl Observer<CrownObservation> {
         Self::new(client, |client, since| {
             let client = client.clone();
             Box::pin(async move { client.observe_crown(observe_context(), since).await })
+        })
+    }
+}
+
+impl Observer<crate::ApplicationProvidersObservation> {
+    /// Observe native application registrations over a version-matched connection.
+    #[must_use]
+    pub fn application_providers(client: AgentClient) -> Self {
+        Self::new(client, |client, since| {
+            let client = client.clone();
+            Box::pin(async move {
+                client
+                    .observe_application_providers(observe_context(), since)
+                    .await
+            })
         })
     }
 }

@@ -21,6 +21,9 @@ pub(super) fn report_handler(
             armed.resolution,
         )
     });
+    if let Some(armed) = armed {
+        let _ = sink.send(CapturedInput::CrownReady(armed.capabilities));
+    }
     move |message| {
         if let Some((index, ratcheted, resolution)) = crown
             && let Some(event) = crate::crown::decode_event(message, device_index, index)

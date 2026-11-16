@@ -220,6 +220,7 @@ fn dispatch_input(
         | CapturedInput::HostModeEntered
         | CapturedInput::CrownTap
         | CapturedInput::CrownRotation(_)
+        | CapturedInput::CrownReady(_)
         | CapturedInput::CrownModeApplied { .. } => {}
     }
 }

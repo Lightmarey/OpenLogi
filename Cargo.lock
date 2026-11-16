@@ -6006,6 +6006,7 @@ dependencies = [
  "openlogi-hook",
  "openlogi-inject",
  "openlogi-ipc",
+ "openlogi-sdk",
  "openlogi-ui",
  "resvg 0.46.0",
  "tempfile",

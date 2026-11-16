@@ -38,6 +38,7 @@ struct Session {
     touched: bool,
     pressed: bool,
     selection_press: Option<SelectionDirection>,
+    application: Option<crate::applications::ActiveSession>,
 }
 
 impl Session {
@@ -53,17 +54,56 @@ impl Session {
     }
 }
 
-type ProfileKey = (String, Option<String>);
+#[derive(PartialEq, Eq, Hash)]
+struct ProfileKey {
+    device: String,
+    scope: Option<String>,
+    provider: Option<openlogi_core::application_control::ProviderId>,
+}
+
+impl ProfileKey {
+    fn new(config_key: &str, policy: &CrownDispatch) -> Self {
+        Self {
+            device: config_key.to_owned(),
+            scope: policy.scope.clone(),
+            provider: policy
+                .application
+                .as_ref()
+                .map(|context| context.provider().clone()),
+        }
+    }
+}
 
 #[derive(Default)]
 pub(super) struct CrownFunctions {
     sessions: HashMap<HidppSessionId, Session>,
     remembered: HashMap<ProfileKey, CrownFunctionId>,
+    capabilities: HashMap<u64, openlogi_sdk::ControlCapabilities>,
 }
 
 impl CrownFunctions {
+    pub(super) fn set_capabilities(
+        &mut self,
+        parent: &HidppSessionId,
+        capabilities: openlogi_sdk::ControlCapabilities,
+    ) {
+        self.capabilities.insert(parent.epoch(), capabilities);
+    }
+
+    pub(super) fn retire(&mut self, parent: &HidppSessionId) {
+        self.capabilities.remove(&parent.epoch());
+    }
+    pub(super) fn application(
+        &self,
+        parent: &HidppSessionId,
+    ) -> Option<crate::applications::ActiveSession> {
+        self.sessions.get(parent)?.application
+    }
     pub(super) fn cancel(&mut self, parent: &HidppSessionId, outputs: &GestureOutputs) {
         if let Some(session) = self.sessions.remove(parent) {
+            if let Some(application) = session.application {
+                outputs.applications.end(application);
+            }
             outputs.cancel_session(&session.output);
         }
         outputs.crown.cancel(parent);
@@ -100,10 +140,7 @@ impl CrownFunctions {
             .sessions
             .get(parent)
             .map(|session| &session.selected)
-            .or_else(|| {
-                self.remembered
-                    .get(&(config_key.to_owned(), policy.scope.clone()))
-            });
+            .or_else(|| self.remembered.get(&ProfileKey::new(config_key, policy)));
         policy
             .profile
             .functions()
@@ -132,7 +169,7 @@ impl CrownFunctions {
         if !policy.profile.is_enabled() || !is_crown_input(input) {
             return false;
         }
-        let profile_key = (plan.config_key.clone(), policy.scope.clone());
+        let profile_key = ProfileKey::new(&plan.config_key, policy);
         let Some(first) = policy.profile.functions().first() else {
             return true;
         };
@@ -148,6 +185,7 @@ impl CrownFunctions {
             })
             .cloned()
             .unwrap_or_else(|| first.id().clone());
+        let capabilities = self.capabilities.get(&parent.epoch()).copied();
         let (touched, pressed) = match input {
             CapturedInput::CrownRotation(motion) => (motion.touched, motion.pressed),
             _ => (false, false),
@@ -156,6 +194,7 @@ impl CrownFunctions {
             .sessions
             .entry(parent.clone())
             .or_insert_with(|| Session {
+                application: begin_application(policy, plan, &selected, capabilities, outputs),
                 output: HidppSessionId::new(parent.device_key()),
                 selected,
                 touched,
@@ -188,6 +227,7 @@ fn handle_input(
     outputs: &GestureOutputs,
     plan: &DispatchPlan,
 ) {
+    forward_application_edge(session, policy, input, outputs);
     match input {
         CapturedInput::ButtonDown(ButtonId::CrownTouch) => session.touched = true,
         CapturedInput::ButtonUp(ButtonId::CrownTouch) => session.touched = false,
@@ -221,10 +261,11 @@ fn handle_input(
     } else {
         RELEASE_LIFETIME
     };
-    outputs.crown.show(
+    outputs.crown.show_application(
         parent,
         CrownHud::new(&policy.profile, session.selected.clone()),
         lifetime,
+        session.application,
     );
 }
 
@@ -248,7 +289,62 @@ fn select_function(
         outputs.cancel_session(&session.output);
         session.output = HidppSessionId::new(parent.device_key());
         session.selected = next.id().clone();
+        if let Some(application) = session.application
+            && let Ok(tool) = openlogi_sdk::ControlId::new(session.selected.as_ref().to_owned())
+        {
+            outputs.applications.select(application, tool);
+        }
     }
+}
+
+fn begin_application(
+    policy: &CrownDispatch,
+    plan: &DispatchPlan,
+    selected: &CrownFunctionId,
+    capabilities: Option<openlogi_sdk::ControlCapabilities>,
+    outputs: &GestureOutputs,
+) -> Option<crate::applications::ActiveSession> {
+    use crate::applications::ControlScope;
+    use openlogi_sdk::{ControlId, SelectionInput};
+    let context = policy.application.as_ref()?;
+    outputs.applications.activate(
+        ControlScope::new(plan.config_key.clone(), policy.scope.clone()),
+        context,
+        capabilities?,
+        ControlId::new(selected.as_ref().to_owned()).ok()?,
+        match policy.profile.selection_trigger() {
+            CrownSelectionTrigger::Press => SelectionInput::Press,
+            CrownSelectionTrigger::TouchTap => SelectionInput::TouchTap,
+        },
+    )
+}
+
+fn forward_application_edge(
+    session: &Session,
+    policy: &CrownDispatch,
+    input: CapturedInput,
+    outputs: &GestureOutputs,
+) {
+    use openlogi_sdk::ControlInput;
+    let Some(application) = session.application else {
+        return;
+    };
+    let press = policy.profile.selection_trigger() == CrownSelectionTrigger::Press;
+    let event = match input {
+        CapturedInput::ButtonDown(ButtonId::CrownTouch) => ControlInput::Touch { down: true },
+        CapturedInput::ButtonUp(ButtonId::CrownTouch) => ControlInput::Touch { down: false },
+        CapturedInput::ButtonDown(ButtonId::CrownPress) => ControlInput::Press {
+            down: true,
+            reserved: press,
+        },
+        CapturedInput::ButtonUp(ButtonId::CrownPress) => ControlInput::Press {
+            down: false,
+            reserved: press,
+        },
+        CapturedInput::CrownTap => ControlInput::Tap { reserved: !press },
+        _ => return,
+    };
+    outputs.applications.input(application, event);
 }
 
 fn handle_press(
@@ -270,6 +366,9 @@ fn handle_press(
         if !pressed && let Some(direction) = session.selection_press.take() {
             select_function(session, parent, policy, outputs, direction);
         }
+        return;
+    }
+    if policy.application.is_some() {
         return;
     }
     let Some(function) = session.function(policy) else {

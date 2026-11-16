@@ -137,6 +137,7 @@ pub(crate) struct InputServices {
     action_runtime: ActionRuntime,
     pub(crate) scroll_input: ScrollInputHandle,
     scroll_runtime: ScrollRuntime,
+    application_server: Option<openlogi_agent_core::applications::ApplicationServer>,
 }
 
 impl InputServices {
@@ -164,9 +165,17 @@ impl InputServices {
         };
         let dispatcher = action_runtime.dispatcher();
         let scroll_input = scroll_runtime.input();
+        let application_server = openlogi_agent_core::applications::ApplicationServer::start(
+            Arc::clone(&shared.applications),
+        )
+        .map_err(|error| warn!(%error, "could not start native application SDK server"))
+        .ok();
         Some(Self {
             ring,
-            crown: Arc::default(),
+            crown: Arc::new(openlogi_agent_core::crown::CrownDisplay::with_applications(
+                Arc::clone(&shared.applications),
+            )),
+            application_server,
             triggers,
             dispatcher,
             action_runtime,
@@ -176,6 +185,7 @@ impl InputServices {
     }
 
     pub(crate) fn shutdown(&mut self) {
+        self.application_server.take();
         self.scroll_runtime.shutdown();
         self.action_runtime.shutdown();
     }
@@ -218,6 +228,7 @@ pub(crate) fn spawn_hidpp_watchers(
             inputs.scroll_input.clone(),
             shared.hook_maps.clone(),
             Arc::clone(&inputs.crown),
+            Arc::clone(&shared.applications),
         ),
     );
     let host_switch = watchers::host_switch::spawn(

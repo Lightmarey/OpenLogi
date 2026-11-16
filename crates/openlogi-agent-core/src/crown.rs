@@ -30,6 +30,7 @@ struct Visible {
     hud: CrownHud,
     expires: Instant,
     sample: Option<Sample>,
+    application: Option<crate::applications::ActiveSession>,
 }
 
 #[derive(Clone)]
@@ -46,6 +47,7 @@ pub struct CrownDisplay {
     published: watch::Sender<Publication>,
     read_brightness: fn() -> ParameterState,
     next_feedback: Arc<AtomicU64>,
+    applications: Option<Arc<crate::applications::ApplicationHost>>,
 }
 
 impl Default for CrownDisplay {
@@ -54,6 +56,7 @@ impl Default for CrownDisplay {
             visible: Arc::new(Mutex::new(None)),
             read_brightness: native_brightness,
             next_feedback: Arc::new(AtomicU64::new(1)),
+            applications: None,
             published: watch::channel(Publication {
                 observation: CrownObservation::new(1, None),
                 expires: None,
@@ -65,7 +68,27 @@ impl Default for CrownDisplay {
 }
 
 impl CrownDisplay {
+    /// Attach a read-only application parameter source to this display channel.
+    #[must_use]
+    pub fn with_applications(applications: Arc<crate::applications::ApplicationHost>) -> Self {
+        Self {
+            applications: Some(applications),
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn show(&self, owner: &HidppSessionId, hud: CrownHud, lifetime: Duration) {
+        self.show_application(owner, hud, lifetime, None);
+    }
+
+    pub(crate) fn show_application(
+        &self,
+        owner: &HidppSessionId,
+        hud: CrownHud,
+        lifetime: Duration,
+        application: Option<crate::applications::ActiveSession>,
+    ) {
         let mut visible = self.visible.lock().unwrap_or_else(PoisonError::into_inner);
         let sample = if brightness(&hud) {
             visible
@@ -87,6 +110,7 @@ impl CrownDisplay {
             hud,
             expires: Instant::now() + lifetime,
             sample,
+            application,
         });
         self.publish(visible.as_ref());
     }
@@ -116,6 +140,17 @@ impl CrownDisplay {
     fn publish(&self, visible: Option<&Visible>) {
         let hud = visible.map(|active| {
             let mut hud = active.hud.clone();
+            if let Some(application) = active.application
+                && let Some(host) = &self.applications
+            {
+                let values = host.values(application);
+                for function in &mut hud.functions {
+                    function.feedback = values
+                        .iter()
+                        .find(|(id, _)| id.as_ref() == function.id.as_ref())
+                        .map(|(_, value)| CrownFeedback::Parameter(value.clone()));
+                }
+            }
             if let Some(sample) = &active.sample
                 && let Some(function) = hud
                     .functions
@@ -195,9 +230,17 @@ impl CrownDisplay {
     pub async fn observe(&self, since: Generation) -> CrownObservation {
         let until = Instant::now() + OBSERVE_HOLD;
         let mut rx = self.published.subscribe();
+        let mut parameters = self
+            .applications
+            .as_ref()
+            .map(|host| host.subscribe_parameters());
         loop {
             self.expire();
             self.refresh_feedback();
+            if self.applications.is_some() {
+                let visible = self.visible.lock().unwrap_or_else(PoisonError::into_inner);
+                self.publish(visible.as_ref());
+            }
             let published = rx.borrow_and_update().clone();
             if published.observation.generation != since || Instant::now() >= until {
                 return published.observation;
@@ -208,11 +251,15 @@ impl CrownDisplay {
                 .fold(until, Instant::min);
             // Internal deadline updates re-arm this wait even if the HUD's
             // generation stays the same. Closed sender is terminal.
-            if matches!(
-                tokio::time::timeout_at(deadline.into(), rx.changed()).await,
-                Ok(Err(_))
-            ) {
-                return self.published.borrow().observation.clone();
+            tokio::select! {
+                changed = rx.changed() => {
+                    if changed.is_err() { return self.published.borrow().observation.clone(); }
+                }
+                () = tokio::time::sleep_until(deadline.into()) => {}
+                () = async {
+                    if let Some(parameters) = &mut parameters { let _ = parameters.changed().await; }
+                    else { std::future::pending::<()>().await; }
+                } => {}
             }
         }
     }

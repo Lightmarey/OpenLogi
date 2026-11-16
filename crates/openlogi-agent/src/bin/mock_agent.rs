@@ -183,6 +183,10 @@ fn main() -> ExitCode {
     };
     let served = runtime.block_on(async {
         let agent = MockAgent::new(state);
+        let _application_server = openlogi_agent_core::applications::ApplicationServer::start(
+            Arc::clone(&agent.applications),
+        )
+        .map_err(std::io::Error::other)?;
         control::spawn_console(agent.clone());
         serve(agent).await
     });
@@ -917,6 +921,7 @@ fn agent_status() -> AgentStatus {
 /// The scripted [`Agent`] implementation, cloned per connection.
 #[derive(Clone)]
 struct MockAgent {
+    applications: Arc<openlogi_agent_core::applications::ApplicationHost>,
     state: Arc<Mutex<State>>,
     /// The last [`Observation`] handed out, so `observe` can stamp a new
     /// generation when the rendered state differs from it.
@@ -943,6 +948,7 @@ impl MockAgent {
         };
         let (disconnects, _) = watch::channel(());
         Self {
+            applications: Arc::default(),
             state: Arc::new(Mutex::new(state)),
             served: Arc::new(Mutex::new(served)),
             notices: Arc::new(NoticeBoard::default()),
@@ -1062,6 +1068,14 @@ impl Agent for MockAgent {
             tokio::time::sleep(openlogi_ipc::OBSERVE_HOLD).await;
         }
         openlogi_ipc::CrownObservation::new(1, None)
+    }
+
+    async fn observe_application_providers(
+        self,
+        _: Context,
+        since: Generation,
+    ) -> openlogi_ipc::ApplicationProvidersObservation {
+        self.applications.observe_providers(since).await
     }
 
     async fn observe_backlight(self, _: Context, since: Generation) -> BacklightObservation {

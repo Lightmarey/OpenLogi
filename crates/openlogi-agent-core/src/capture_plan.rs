@@ -99,6 +99,8 @@ pub struct CrownDispatch {
     pub scope: Option<String>,
     /// Validated function list used by the capture dispatcher.
     pub profile: openlogi_core::crown::CrownProfile,
+    /// A connected provider's ephemeral context, retained only by its lease.
+    pub application: Option<crate::applications::ApplicationContext>,
 }
 
 /// One device's independently versioned hardware target and dispatch plan.
@@ -479,6 +481,7 @@ fn crown_plan(
         (!device.crown.is_default()).then(|| CrownDispatch {
             scope: scope.map(str::to_owned),
             profile: profile.clone(),
+            application: None,
         })
     });
     let capture = crown

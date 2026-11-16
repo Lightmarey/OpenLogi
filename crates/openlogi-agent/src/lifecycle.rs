@@ -328,6 +328,12 @@ impl Armed {
         running.shared.flow.arm();
         let (mut watchers, inventory_refresh) = startup::spawn_state_watchers(&running.shared);
         let mut ring = running.inputs.ring.subscribe();
+        let mut applications = running.shared.applications.subscribe();
+        running
+            .orchestrator
+            .lock()
+            .await
+            .refresh_application_contexts();
 
         info!("openlogi-agent started");
         loop {
@@ -379,6 +385,9 @@ impl Armed {
                 },
                 Ok(()) = ring.changed() => {
                     running.apply_held_pointer().await;
+                }
+                Ok(()) = applications.changed() => {
+                    running.orchestrator.lock().await.refresh_application_contexts();
                 }
                 () = running.virtual_keyboard.lost() => {
                     info!("virtual HID keyboard is gone — reporting it unavailable");
