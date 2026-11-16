@@ -137,6 +137,7 @@ struct CapturedEvent {
     physical_key: PhysicalDeviceKey,
     session: HidppSessionId,
     input: CapturedInput,
+    modifiers: openlogi_core::config::KeyModifiers,
 }
 
 struct SessionDone {
@@ -218,10 +219,12 @@ fn spawn_input_forwarder(
                 diverted.record(button);
                 continue;
             }
+            let modifiers = dispatch::selection_modifiers(input).await;
             let _ = events.send(SessionEvent::Input(CapturedEvent {
                 physical_key: physical_key.clone(),
                 session: session.clone(),
                 input,
+                modifiers,
             }));
         }
     })
@@ -593,7 +596,12 @@ impl GestureManagerState {
                 let live = self.slots.get(key).and_then(GestureSlot::session);
                 let dispatch_context = dispatch_context_for(&event.session, live);
                 if let Some((session, plan)) = dispatch_context {
-                    self.input_dispatcher.dispatch(session, plan, event.input);
+                    self.input_dispatcher.dispatch_with_modifiers(
+                        session,
+                        plan,
+                        event.input,
+                        event.modifiers,
+                    );
                 } else {
                     self.input_dispatcher.cancel_session(&event.session);
                     debug!(

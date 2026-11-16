@@ -46,7 +46,9 @@ pub use pointer::{
 };
 
 mod probe;
-pub use probe::{DesktopPoint, DisplayBounds, PointerProbe, PointerState, WarpError};
+pub use probe::{
+    DesktopPoint, DisplayBounds, PointerProbe, PointerState, WarpError, held_modifiers,
+};
 
 /// Logitech's USB/Bluetooth vendor id (`0x046D`), widened from
 /// [`openlogi_core::hid::LOGITECH_VENDOR_ID`] because the hook's identity

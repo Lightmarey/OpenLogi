@@ -136,6 +136,22 @@ fn rejected(error: x11rb::errors::ConnectionError) -> WarpError {
     WarpError::Rejected(io::Error::other(error))
 }
 
+/// Read modifier state from every available keyboard without taking a grab.
+pub(crate) fn held_modifiers() -> KeyModifiers {
+    use evdev::KeyCode;
+
+    let held: std::collections::BTreeSet<_> = evdev::enumerate()
+        .filter_map(|(_, device)| device.get_key_state().ok())
+        .flat_map(|keys| keys.iter().collect::<Vec<_>>())
+        .collect();
+    KeyModifiers {
+        shift: held.contains(&KeyCode::KEY_LEFTSHIFT) || held.contains(&KeyCode::KEY_RIGHTSHIFT),
+        control: held.contains(&KeyCode::KEY_LEFTCTRL) || held.contains(&KeyCode::KEY_RIGHTCTRL),
+        option: held.contains(&KeyCode::KEY_LEFTALT) || held.contains(&KeyCode::KEY_RIGHTALT),
+        command: held.contains(&KeyCode::KEY_LEFTMETA) || held.contains(&KeyCode::KEY_RIGHTMETA),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use x11rb::protocol::xproto::KeyButMask;
@@ -163,5 +179,52 @@ mod tests {
         assert_eq!(root_pixel(-0.4), 0);
         assert_eq!(root_pixel(1e9), i16::MAX);
         assert_eq!(root_pixel(-1e9), i16::MIN);
+    }
+    #[test]
+    #[ignore = "requires writable /dev/uinput and readable evdev keyboard nodes"]
+    fn live_modifier_query_reads_both_shift_keys_and_release() {
+        use evdev::{AttributeSet, InputEvent, KeyCode};
+        let keys = AttributeSet::from_iter([KeyCode::KEY_LEFTSHIFT, KeyCode::KEY_RIGHTSHIFT]);
+        let mut keyboard =
+            openlogi_inject::uinput::builder(openlogi_inject::uinput::Device::ActionInjector)
+                .unwrap()
+                .with_keys(&keys)
+                .unwrap()
+                .build()
+                .unwrap();
+        let node = keyboard
+            .enumerate_dev_nodes_blocking()
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        // udev applies input-group access after the kernel publishes the node.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let mut reader = loop {
+            match evdev::Device::open(&node) {
+                Ok(reader) => break reader,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::PermissionDenied
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => panic!("read the virtual modifier device: {error}"),
+            }
+        };
+        let mut check = |keyboard: &mut evdev::uinput::VirtualDevice, code, value, expected| {
+            keyboard.emit(&[InputEvent::new(1, code, value)]).unwrap();
+            assert!(
+                reader
+                    .fetch_events()
+                    .unwrap()
+                    .any(|event| event.code() == code)
+            );
+            assert_eq!(super::held_modifiers().shift, expected);
+        };
+        check(&mut keyboard, KeyCode::KEY_LEFTSHIFT.0, 1, true);
+        check(&mut keyboard, KeyCode::KEY_RIGHTSHIFT.0, 1, true);
+        check(&mut keyboard, KeyCode::KEY_LEFTSHIFT.0, 0, true);
+        check(&mut keyboard, KeyCode::KEY_RIGHTSHIFT.0, 0, false);
     }
 }

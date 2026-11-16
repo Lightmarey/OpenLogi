@@ -612,7 +612,7 @@ fn mac_keycode(vk: u32) -> Option<u16> {
 
 /// Snapshot the modifier state via `GetAsyncKeyState` — `WH_KEYBOARD_LL`
 /// events carry no modifier flags of their own.
-fn current_modifiers() -> KeyModifiers {
+pub(crate) fn current_modifiers() -> KeyModifiers {
     KeyModifiers {
         shift: key_held(VK_SHIFT),
         control: key_held(VK_CONTROL),

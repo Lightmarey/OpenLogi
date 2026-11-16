@@ -1,0 +1,11 @@
+# Owner: windows::hook::current_modifiers.
+id: hook-windows-modifiers-owner
+language: rust
+severity: error
+message: Use windows::hook::current_modifiers for the shared Windows modifier snapshot.
+files:
+  - crates/openlogi-hook/src/windows/**/*.rs
+ignores:
+  - crates/openlogi-hook/src/windows/hook.rs
+rule:
+  pattern: key_held(VK_SHIFT)

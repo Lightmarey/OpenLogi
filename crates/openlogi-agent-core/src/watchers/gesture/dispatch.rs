@@ -201,14 +201,33 @@ impl InputDispatcher {
 
     /// Route one captured input from `session` to its bound action or
     /// re-synthesised scroll output.
+    #[cfg(test)]
     pub(super) fn dispatch(
         &mut self,
         session: &HidppSessionId,
         plan: &DispatchPlan,
         input: CapturedInput,
     ) {
+        self.dispatch_with_modifiers(
+            session,
+            plan,
+            input,
+            openlogi_core::config::KeyModifiers::default(),
+        );
+    }
+
+    pub(super) fn dispatch_with_modifiers(
+        &mut self,
+        session: &HidppSessionId,
+        plan: &DispatchPlan,
+        input: CapturedInput,
+        modifiers: openlogi_core::config::KeyModifiers,
+    ) {
         let key = session.device_key();
-        if self.crown.dispatch(session, plan, input, &self.outputs) {
+        if self
+            .crown
+            .dispatch(session, plan, input, modifiers, &self.outputs)
+        {
             return;
         }
         match input {
@@ -457,3 +476,19 @@ fn press_binding(plan: &DispatchPlan, button: ButtonId, shifted: bool) -> Option
 
 #[cfg(test)]
 mod tests;
+
+/// Read modifier state only for Crown selection edges, preserving input order.
+pub(super) async fn selection_modifiers(
+    input: CapturedInput,
+) -> openlogi_core::config::KeyModifiers {
+    if matches!(
+        input,
+        CapturedInput::ButtonDown(ButtonId::CrownPress) | CapturedInput::CrownTap
+    ) {
+        tokio::task::spawn_blocking(openlogi_hook::held_modifiers)
+            .await
+            .unwrap_or_default()
+    } else {
+        openlogi_core::config::KeyModifiers::default()
+    }
+}

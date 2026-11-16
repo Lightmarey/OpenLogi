@@ -708,7 +708,9 @@ shell-command fields. The editor validates the input lifecycle before saving.
 The default **Press and release** selector reserves the press action. A press that
 rotates, including movement shorter than one detent, leaves the current function
 selected. **Touch gesture Tap** selects on a clean firmware tap and enables press
-bindings. The selected function is remembered separately for each device and
+bindings. Hold Shift while using the selection input to cycle backwards. A press
+retains the direction captured when it went down, including when Shift is released
+first. The selected function is remembered separately for each device and
 application scope during the agent run. Configuration edits retain function IDs.
 
 `devices.<key>.crown.default` is the device profile. Each

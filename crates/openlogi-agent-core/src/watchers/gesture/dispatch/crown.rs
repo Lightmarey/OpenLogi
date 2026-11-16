@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use openlogi_core::binding::ButtonId;
+use openlogi_core::config::KeyModifiers;
 use openlogi_core::crown::{CrownControl, CrownFunctionId, CrownSelectionTrigger};
 use openlogi_hid::CapturedInput;
 use openlogi_ipc::CrownHud;
@@ -17,8 +18,24 @@ use super::super::GestureOutputs;
 enum SelectionPress {
     #[default]
     Idle,
-    Pending,
+    Pending(SelectionDirection),
     Consumed,
+}
+
+#[derive(Clone, Copy)]
+enum SelectionDirection {
+    Forward,
+    Backward,
+}
+
+impl SelectionDirection {
+    fn from_modifiers(modifiers: KeyModifiers) -> Self {
+        if modifiers.shift {
+            Self::Backward
+        } else {
+            Self::Forward
+        }
+    }
 }
 
 struct Session {
@@ -54,6 +71,7 @@ impl CrownFunctions {
         parent: &HidppSessionId,
         plan: &DispatchPlan,
         input: CapturedInput,
+        modifiers: KeyModifiers,
         outputs: &GestureOutputs,
     ) -> bool {
         let Some(policy) = &plan.crown else {
@@ -88,7 +106,7 @@ impl CrownFunctions {
                 pressed: false,
                 selection_press: SelectionPress::default(),
             });
-        handle_input(session, parent, policy, input, outputs, plan);
+        handle_input(session, parent, policy, input, modifiers, outputs, plan);
         self.remembered
             .insert(profile_key, session.selected.clone());
         true
@@ -112,6 +130,7 @@ fn handle_input(
     parent: &HidppSessionId,
     policy: &CrownDispatch,
     input: CapturedInput,
+    modifiers: KeyModifiers,
     outputs: &GestureOutputs,
     plan: &DispatchPlan,
 ) {
@@ -129,7 +148,13 @@ fn handle_input(
             {
                 return;
             }
-            select_next(session, parent, policy, outputs);
+            select_function(
+                session,
+                parent,
+                policy,
+                outputs,
+                SelectionDirection::from_modifiers(modifiers),
+            );
         }
         CapturedInput::ButtonDown(button)
         | CapturedInput::ButtonUp(button)
@@ -137,6 +162,11 @@ fn handle_input(
             let Some(control) = CrownControl::for_button(button) else {
                 return;
             };
+            if matches!(input, CapturedInput::ButtonDown(ButtonId::CrownPress)) && !session.pressed
+            {
+                session.selection_press =
+                    SelectionPress::Pending(SelectionDirection::from_modifiers(modifiers));
+            }
             dispatch_control(session, parent, policy, control, input, outputs, plan);
         }
         _ => return,
@@ -153,18 +183,23 @@ fn handle_input(
     );
 }
 
-fn select_next(
+fn select_function(
     session: &mut Session,
     parent: &HidppSessionId,
     policy: &CrownDispatch,
     outputs: &GestureOutputs,
+    direction: SelectionDirection,
 ) {
     let functions = policy.profile.functions();
     let index = functions
         .iter()
         .position(|function| function.id() == &session.selected)
         .unwrap_or(0);
-    if let Some(next) = functions.get((index + 1) % functions.len()) {
+    let next = match direction {
+        SelectionDirection::Forward => (index + 1) % functions.len(),
+        SelectionDirection::Backward => (index + functions.len() - 1) % functions.len(),
+    };
+    if let Some(next) = functions.get(next) {
         outputs.actions.cancel_hidpp_session(&session.output);
         session.output = HidppSessionId::new(parent.device_key());
         session.selected = next.id().clone();
@@ -185,18 +220,14 @@ fn dispatch_control(
     {
         match input {
             CapturedInput::ButtonDown(_) => {
-                if !session.pressed {
-                    session.selection_press = SelectionPress::Pending;
-                }
                 session.pressed = true;
             }
             CapturedInput::ButtonUp(_) => {
                 session.pressed = false;
-                if matches!(
-                    std::mem::take(&mut session.selection_press),
-                    SelectionPress::Pending
-                ) {
-                    select_next(session, parent, policy, outputs);
+                if let SelectionPress::Pending(direction) =
+                    std::mem::take(&mut session.selection_press)
+                {
+                    select_function(session, parent, policy, outputs, direction);
                 }
             }
             _ => {}

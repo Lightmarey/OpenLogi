@@ -35,13 +35,12 @@ impl Probe {
     )]
     pub(crate) fn state(&mut self) -> Option<PointerState> {
         let position = <super::Backend as HookBackend>::cursor_position()?;
-        let flags = CGEventSource::flags_state(CGEventSourceStateID::HIDSystemState);
         Some(PointerState {
             position: DesktopPoint {
                 x: position.x,
                 y: position.y,
             },
-            modifiers: modifiers(flags),
+            modifiers: held_modifiers(),
         })
     }
 
@@ -107,6 +106,12 @@ fn check(error: CGError) -> Result<(), WarpError> {
             error.0
         ))))
     }
+}
+
+pub(crate) fn held_modifiers() -> KeyModifiers {
+    modifiers(CGEventSource::flags_state(
+        CGEventSourceStateID::HIDSystemState,
+    ))
 }
 
 #[cfg(test)]

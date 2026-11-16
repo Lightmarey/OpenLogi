@@ -226,6 +226,7 @@ async fn press_release_is_balanced_and_stale_cancel_cannot_hide_a_replacement() 
         &old,
         &policy,
         CapturedInput::ButtonDown(ButtonId::CrownPress),
+        KeyModifiers::default(),
         &outputs,
     );
     let ButtonRuntimeEvent::Started(press) = events.recv_timeout(Duration::from_secs(1)).unwrap()
@@ -233,7 +234,13 @@ async fn press_release_is_balanced_and_stale_cancel_cannot_hide_a_replacement() 
         panic!("press started");
     };
     assert_eq!(press.start_action(), Some(&Action::MuteVolume));
-    dispatcher.dispatch(&old, &policy, CapturedInput::CrownTap, &outputs);
+    dispatcher.dispatch(
+        &old,
+        &policy,
+        CapturedInput::CrownTap,
+        KeyModifiers::default(),
+        &outputs,
+    );
     assert_eq!(
         display.observe(0).await.hud.unwrap().selected.as_ref(),
         "volume",
@@ -243,6 +250,7 @@ async fn press_release_is_balanced_and_stale_cancel_cannot_hide_a_replacement() 
         &old,
         &policy,
         CapturedInput::ButtonUp(ButtonId::CrownPress),
+        KeyModifiers::default(),
         &outputs,
     );
     let ButtonRuntimeEvent::Ended {
@@ -257,6 +265,7 @@ async fn press_release_is_balanced_and_stale_cancel_cannot_hide_a_replacement() 
         &current,
         &policy,
         CapturedInput::ButtonDown(ButtonId::CrownTouch),
+        KeyModifiers::default(),
         &outputs,
     );
     dispatcher.cancel(&old, &outputs);
@@ -295,6 +304,7 @@ async fn crown_thresholds_and_held_output_use_balanced_upstream_lifecycles() {
         &session,
         &policy,
         CapturedInput::ButtonDown(ButtonId::CrownPress),
+        KeyModifiers::default(),
         &outputs,
     );
     let ButtonRuntimeEvent::Started(short) = events.recv_timeout(Duration::from_secs(1)).unwrap()
@@ -306,6 +316,7 @@ async fn crown_thresholds_and_held_output_use_balanced_upstream_lifecycles() {
         &session,
         &policy,
         CapturedInput::ButtonUp(ButtonId::CrownPress),
+        KeyModifiers::default(),
         &outputs,
     );
     let ButtonRuntimeEvent::Triggered { action, .. } =
@@ -325,6 +336,7 @@ async fn crown_thresholds_and_held_output_use_balanced_upstream_lifecycles() {
         &session,
         &policy,
         CapturedInput::ButtonDown(ButtonId::CrownPress),
+        KeyModifiers::default(),
         &outputs,
     );
     assert!(matches!(
@@ -345,6 +357,105 @@ async fn crown_thresholds_and_held_output_use_balanced_upstream_lifecycles() {
             ..
         }
     ));
+    assert!(buttons.shutdown());
+    scroll.shutdown();
+}
+
+#[tokio::test]
+async fn shift_selection_moves_backwards_and_keeps_press_time_direction() {
+    use openlogi_core::config::KeyModifiers;
+
+    let (actions, mut buttons, _events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let display = Arc::new(crate::crown::CrownDisplay::default());
+    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), display.clone());
+    let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
+    let session = HidppSessionId::new("craft");
+    let policy = plan(None);
+    let shift = KeyModifiers {
+        shift: true,
+        ..KeyModifiers::default()
+    };
+    for expected in ["tabs", "workspaces", "volume"] {
+        dispatcher.dispatch_with_modifiers(
+            &session,
+            &policy,
+            CapturedInput::ButtonDown(ButtonId::CrownPress),
+            shift,
+        );
+        // Releasing Shift before Crown retains the direction chosen on press.
+        dispatcher.dispatch(
+            &session,
+            &policy,
+            CapturedInput::ButtonUp(ButtonId::CrownPress),
+        );
+        assert_eq!(
+            display.observe(0).await.hud.unwrap().selected.as_ref(),
+            expected
+        );
+    }
+    let policy = touch_plan(None);
+    dispatcher.dispatch_with_modifiers(&session, &policy, CapturedInput::CrownTap, shift);
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "tabs"
+    );
+    dispatcher.dispatch(&session, &policy, CapturedInput::CrownTap);
+    assert_eq!(
+        display.observe(0).await.hud.unwrap().selected.as_ref(),
+        "volume"
+    );
+    dispatcher.cancel_session(&session);
+    assert!(buttons.shutdown());
+    scroll.shutdown();
+}
+
+#[tokio::test]
+async fn starter_functions_dispatch_real_rotation_actions() {
+    let (actions, mut buttons, events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
+    let session = HidppSessionId::new("craft");
+    let policy = plan(None);
+    for (left, right) in [
+        (Action::VolumeDown, Action::VolumeUp),
+        (Action::PreviousDesktop, Action::NextDesktop),
+        (Action::PrevTab, Action::NextTab),
+    ] {
+        for (button, expected) in [(ButtonId::CrownLeft, left), (ButtonId::CrownRight, right)] {
+            dispatcher.dispatch(&session, &policy, CapturedInput::ButtonPulse(button));
+            let ButtonRuntimeEvent::Started(press) =
+                events.recv_timeout(Duration::from_secs(1)).unwrap()
+            else {
+                panic!("rotation action started");
+            };
+            assert_eq!(press.start_action(), Some(&expected));
+            assert!(matches!(
+                events.recv_timeout(Duration::from_secs(1)).unwrap(),
+                ButtonRuntimeEvent::Ended { .. }
+            ));
+        }
+        dispatcher.dispatch(
+            &session,
+            &policy,
+            CapturedInput::ButtonDown(ButtonId::CrownPress),
+        );
+        dispatcher.dispatch(
+            &session,
+            &policy,
+            CapturedInput::ButtonUp(ButtonId::CrownPress),
+        );
+    }
+    dispatcher.cancel_session(&session);
     assert!(buttons.shutdown());
     scroll.shutdown();
 }

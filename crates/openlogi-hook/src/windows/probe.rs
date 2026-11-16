@@ -13,14 +13,11 @@ use windows_sys::Win32::Foundation::{LPARAM, POINT, RECT, TRUE};
 use windows_sys::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
 };
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
-};
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetCursorPos};
 use windows_sys::core::BOOL;
 
-use super::hook::key_held;
-use crate::{DesktopPoint, DisplayBounds, KeyModifiers, PointerState, WarpError};
+pub(crate) use super::hook::current_modifiers as held_modifiers;
+use crate::{DesktopPoint, DisplayBounds, PointerState, WarpError};
 
 /// The Windows probe. Win32 needs no connection, so it holds nothing.
 pub(crate) struct Probe;
@@ -49,12 +46,7 @@ impl Probe {
                 x: f64::from(point.x),
                 y: f64::from(point.y),
             },
-            modifiers: KeyModifiers {
-                shift: key_held(VK_SHIFT),
-                control: key_held(VK_CONTROL),
-                option: key_held(VK_MENU),
-                command: key_held(VK_LWIN) || key_held(VK_RWIN),
-            },
+            modifiers: held_modifiers(),
         })
     }
 
