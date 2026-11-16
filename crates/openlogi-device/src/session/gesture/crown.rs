@@ -14,6 +14,12 @@ pub(super) fn report_handler(
     sink: mpsc::UnboundedSender<CapturedInput>,
 ) -> impl Fn(&hidpp::protocol::v20::Message) + Send + Sync + 'static {
     let crown = armed.map(|armed| (armed.crown.feature_index(), armed.ratcheted));
+    if let Some(armed) = armed {
+        accum
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .resolution = armed.resolution;
+    }
     move |message| {
         if let Some((index, ratcheted)) = crown
             && let Some(event) = crate::crown::decode_event(message, device_index, index)
@@ -38,7 +44,9 @@ enum TapContact {
 pub(super) struct CrownAccum {
     touched: bool,
     pressed: bool,
+    rotating: bool,
     tap_contact: TapContact,
+    resolution: openlogi_core::rotary::RotationResolution,
 }
 
 impl CrownAccum {
@@ -81,32 +89,25 @@ impl CrownAccum {
         if pressed == Some(true) {
             emit_edge(&mut self.pressed, pressed, ButtonId::CrownPress, sink);
         }
-        if event.relative_slot_rotation != 0 || event.relative_ratchet_rotation != 0 {
-            let _ = sink.send(CapturedInput::CrownRotation {
+        if event.relative_slot_rotation != 0
+            || event.relative_ratchet_rotation != 0
+            || (self.rotating && matches!(event.rotation_state, crate::crown::RotationState::Stop))
+        {
+            let _ = sink.send(CapturedInput::CrownRotation(crate::crown::CrownMotion {
                 slots: event.relative_slot_rotation,
                 ratchets: event.relative_ratchet_rotation,
-            });
+                resolution: self.resolution,
+                ratcheted,
+                phase: event.rotation_state,
+                speed: event.speed,
+                pressed: self.pressed,
+            }));
         }
-
-        // These are two measurements of the same movement, not two inputs.
-        // In detent mode the finer slot count must never multiply actions.
-        let delta = if ratcheted {
-            event.relative_ratchet_rotation
-        } else {
-            event.relative_slot_rotation
-        };
-        if delta != 0 {
-            let button = match (self.pressed, delta > 0) {
-                (false, false) => ButtonId::CrownLeft,
-                (false, true) => ButtonId::CrownRight,
-                (true, false) => ButtonId::CrownPressedLeft,
-                (true, true) => ButtonId::CrownPressedRight,
-            };
-            // Preserve signed magnitude, including i8::MIN, through the
-            // shared pulse dispatcher. No subprocess or host injection here.
-            for _ in 0..delta.unsigned_abs() {
-                let _ = sink.send(CapturedInput::ButtonPulse(button));
-            }
+        if event.relative_slot_rotation != 0 || event.relative_ratchet_rotation != 0 {
+            self.rotating = true;
+        }
+        if matches!(event.rotation_state, crate::crown::RotationState::Stop) {
+            self.rotating = false;
         }
         // Both contact holds include the report's final movement, even when
         // it has not crossed a detent. Release their output only afterwards.
@@ -181,39 +182,28 @@ mod tests {
         );
     }
 
+    fn motion(slots: i8, ratchets: i8, ratcheted: bool, pressed: bool) -> CapturedInput {
+        let mut motion = crate::crown::CrownMotion::new(slots, ratchets, ratcheted);
+        motion.pressed = pressed;
+        CapturedInput::CrownRotation(motion)
+    }
+
     #[test]
     fn crown_rotation_preserves_magnitude_and_separates_pressed_rotation() {
         let (sink, mut inputs) = mpsc::unbounded_channel();
         let mut crown = CrownAccum::default();
         crown.on_event(update(12, 2, 0, 0, 0), true, &sink);
+        assert_eq!(drain(&mut inputs), [motion(12, 2, true, false)]);
+        crown.on_event(update(-12, -3, 0, 1, 0), true, &sink);
         assert_eq!(
             drain(&mut inputs),
-            vec![
-                CapturedInput::CrownRotation {
-                    slots: 12,
-                    ratchets: 2
-                },
-                CapturedInput::ButtonPulse(ButtonId::CrownRight),
-                CapturedInput::ButtonPulse(ButtonId::CrownRight),
+            [
+                CapturedInput::ButtonDown(ButtonId::CrownPress),
+                motion(-12, -3, true, true),
             ]
         );
-        crown.on_event(update(-12, -3, 0, 1, 0), true, &sink);
-        let mut expected = vec![CapturedInput::ButtonDown(ButtonId::CrownPress)];
-        expected.push(CapturedInput::CrownRotation {
-            slots: -12,
-            ratchets: -3,
-        });
-        expected.extend([CapturedInput::ButtonPulse(ButtonId::CrownPressedLeft); 3]);
-        assert_eq!(drain(&mut inputs), expected);
-        // Slot reports between detents retain motion without action pulses.
         crown.on_event(update(1, 0, 0, 2, 0), true, &sink);
-        assert_eq!(
-            drain(&mut inputs),
-            [CapturedInput::CrownRotation {
-                slots: 1,
-                ratchets: 0
-            }]
-        );
+        assert_eq!(drain(&mut inputs), [motion(1, 0, true, true)]);
     }
 
     #[test]
@@ -221,15 +211,10 @@ mod tests {
         let (sink, mut inputs) = mpsc::unbounded_channel();
         let mut crown = CrownAccum::default();
         crown.on_event(update(i8::MIN, -1, 0, 0, 0), false, &sink);
-        let mut expected = vec![CapturedInput::CrownRotation {
-            slots: i8::MIN,
-            ratchets: -1,
-        }];
-        expected.extend([CapturedInput::ButtonPulse(ButtonId::CrownLeft); 128]);
-        assert_eq!(drain(&mut inputs), expected);
-        crown.on_event(update(0, 0, 0, 0, 1), true, &sink);
-        crown.on_event(update(0, 0, 0, 0, 2), true, &sink);
-        crown.on_event(update(0, 0, 0, 0, 255), true, &sink);
+        assert_eq!(drain(&mut inputs), [motion(i8::MIN, -1, false, false)]);
+        for gesture in [1, 2, 255] {
+            crown.on_event(update(0, 0, 0, 0, gesture), true, &sink);
+        }
         assert!(drain(&mut inputs).is_empty());
     }
 
@@ -243,10 +228,7 @@ mod tests {
         assert_eq!(
             drain(&mut inputs),
             [
-                CapturedInput::CrownRotation {
-                    slots: 1,
-                    ratchets: 0
-                },
+                motion(1, 0, true, true),
                 CapturedInput::ButtonUp(ButtonId::CrownTouch),
                 CapturedInput::ButtonUp(ButtonId::CrownPress),
             ]
@@ -264,16 +246,7 @@ mod tests {
                     drain(&mut inputs);
                     crown.on_event(update(direction, direction, 3, 5, 0), ratcheted, &sink);
                     let mut expected = vec![
-                        CapturedInput::CrownRotation {
-                            slots: direction,
-                            ratchets: direction,
-                        },
-                        CapturedInput::ButtonPulse(match (pressed, direction > 0) {
-                            (false, false) => ButtonId::CrownLeft,
-                            (false, true) => ButtonId::CrownRight,
-                            (true, false) => ButtonId::CrownPressedLeft,
-                            (true, true) => ButtonId::CrownPressedRight,
-                        }),
+                        motion(direction, direction, ratcheted, pressed),
                         CapturedInput::ButtonUp(ButtonId::CrownTouch),
                     ];
                     if pressed {

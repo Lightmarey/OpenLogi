@@ -250,6 +250,8 @@ enum HidppWheel {
     Main,
     /// The horizontal thumb wheel.
     Thumb,
+    /// Independent Crown motion, including direct-binding mode.
+    Crown,
 }
 
 impl ScrollSource {

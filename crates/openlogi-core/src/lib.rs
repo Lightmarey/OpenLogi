@@ -33,6 +33,7 @@ pub mod locale;
 pub mod logging;
 #[cfg(feature = "fs")]
 pub mod paths;
+pub mod rotary;
 pub mod scroll;
 #[cfg(feature = "fs")]
 pub mod single_instance;

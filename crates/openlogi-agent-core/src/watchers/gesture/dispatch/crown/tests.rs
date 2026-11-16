@@ -88,11 +88,7 @@ async fn press_selects_on_release_without_firing_a_binding_and_rotation_consumes
     );
     for input in [
         CapturedInput::ButtonDown(ButtonId::CrownPress),
-        CapturedInput::CrownRotation {
-            slots: 6,
-            ratchets: 1,
-        },
-        CapturedInput::ButtonPulse(ButtonId::CrownPressedRight),
+        CapturedInput::CrownRotation(openlogi_hid::crown::CrownMotion::new(6, 1, true)),
         CapturedInput::ButtonUp(ButtonId::CrownPress),
     ] {
         dispatcher.dispatch(&session, &policy, input);
@@ -119,10 +115,7 @@ async fn press_selects_on_release_without_firing_a_binding_and_rotation_consumes
     );
     for input in [
         CapturedInput::ButtonDown(ButtonId::CrownPress),
-        CapturedInput::CrownRotation {
-            slots: 1,
-            ratchets: 0,
-        },
+        CapturedInput::CrownRotation(openlogi_hid::crown::CrownMotion::new(1, 0, true)),
         CapturedInput::ButtonUp(ButtonId::CrownPress),
     ] {
         dispatcher.dispatch(&session, &policy, input);
@@ -431,8 +424,16 @@ async fn starter_functions_dispatch_real_rotation_actions() {
         (Action::PreviousDesktop, Action::NextDesktop),
         (Action::PrevTab, Action::NextTab),
     ] {
-        for (button, expected) in [(ButtonId::CrownLeft, left), (ButtonId::CrownRight, right)] {
-            dispatcher.dispatch(&session, &policy, CapturedInput::ButtonPulse(button));
+        for (direction, expected) in [(-1, left), (1, right)] {
+            dispatcher.dispatch(
+                &session,
+                &policy,
+                CapturedInput::CrownRotation(openlogi_hid::crown::CrownMotion::new(
+                    direction * 6,
+                    direction,
+                    true,
+                )),
+            );
             let ButtonRuntimeEvent::Started(press) =
                 events.recv_timeout(Duration::from_secs(1)).unwrap()
             else {
@@ -457,5 +458,65 @@ async fn starter_functions_dispatch_real_rotation_actions() {
     }
     dispatcher.cancel_session(&session);
     assert!(buttons.shutdown());
+    scroll.shutdown();
+}
+
+#[tokio::test]
+async fn crown_fractional_steps_follow_speed_and_inversion_and_expire_with_the_function() {
+    use openlogi_core::rotary::{RotarySensitivity, RotarySettings};
+    let (actions, mut buttons, events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
+    let session = HidppSessionId::new("craft");
+    let mut policy = plan(None);
+    let profile = &mut policy.crown.as_mut().unwrap().profile;
+    let mut functions = profile.functions().to_vec();
+    functions[0]
+        .set_binding(CrownControl::Left, Action::Copy.into())
+        .unwrap();
+    functions[0].set_rotation(
+        RotarySettings::default()
+            .with_sensitivity(RotarySensitivity::new(50).unwrap())
+            .with_inverted(true),
+    );
+    profile.replace_functions(functions).unwrap();
+    let movement = CapturedInput::CrownRotation(openlogi_hid::crown::CrownMotion::new(6, 1, true));
+    dispatcher.dispatch(&session, &policy, movement);
+    dispatcher.dispatch(&session, &policy, movement);
+    let ButtonRuntimeEvent::Started(press) = events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("two half steps produce one action");
+    };
+    assert_eq!(press.start_action(), Some(&Action::Copy));
+    assert!(matches!(
+        events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        ButtonRuntimeEvent::Ended { .. }
+    ));
+    dispatcher.dispatch(&session, &policy, movement);
+    for _ in 0..3 {
+        dispatcher.dispatch(
+            &session,
+            &policy,
+            CapturedInput::ButtonDown(ButtonId::CrownPress),
+        );
+        dispatcher.dispatch(
+            &session,
+            &policy,
+            CapturedInput::ButtonUp(ButtonId::CrownPress),
+        );
+    }
+    dispatcher.dispatch(&session, &policy, movement);
+    dispatcher.cancel_session(&session);
+    assert!(buttons.shutdown());
+    assert!(
+        events.try_recv().is_err(),
+        "a prior function's half step cannot fire after returning"
+    );
+    assert!(dispatcher.crown_steps.is_empty());
     scroll.shutdown();
 }

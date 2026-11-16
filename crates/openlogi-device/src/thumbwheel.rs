@@ -22,7 +22,6 @@ use hidpp::{
     nibble::U4,
     protocol::v20::{self, Hidpp20Error},
 };
-use serde::{Deserialize, Serialize};
 
 /// `Thumbwheel` HID++ feature ID.
 pub const FEATURE_ID: u16 = 0x2150;
@@ -121,42 +120,7 @@ impl RotationStatus {
     }
 }
 
-/// What one revolution of the wheel measures in each reporting mode.
-///
-/// The two are not the same unit: an MX Master 4 reports 20 ratchets per
-/// revolution natively and 120 increments per revolution diverted. Anything
-/// re-synthesising scroll from diverted increments has to scale by the ratio,
-/// or the same physical motion scrolls six times as far as it did before the
-/// wheel was diverted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WheelResolution {
-    /// Ratchets per revolution in native (HID) mode.
-    pub native_res: u16,
-    /// Rotation increments per revolution in diverted (HID++) mode.
-    pub diverted_res: u16,
-}
-
-impl WheelResolution {
-    /// Resolutions a wheel did not report, scaling increments through
-    /// unchanged.
-    pub const UNKNOWN: Self = Self {
-        native_res: 0,
-        diverted_res: 0,
-    };
-
-    /// Native scroll units one diverted increment is worth.
-    ///
-    /// `1.0` when either resolution is zero — a wheel that reports no
-    /// resolution keeps the raw increment-per-unit behavior rather than
-    /// having its scroll silently scaled by a guess.
-    #[must_use]
-    pub fn native_per_increment(self) -> f64 {
-        if self.native_res == 0 || self.diverted_res == 0 {
-            return 1.0;
-        }
-        f64::from(self.native_res) / f64::from(self.diverted_res)
-    }
-}
+pub use openlogi_core::rotary::RotationResolution as WheelResolution;
 
 /// Characteristics + capabilities returned by `getThumbwheelInfo`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -125,6 +125,7 @@ impl ArmedThumb {
 pub(super) struct ArmedCrown {
     pub(super) crown: Crown,
     pub(super) ratcheted: bool,
+    pub(super) resolution: openlogi_core::rotary::RotationResolution,
 }
 
 pub(super) struct ArmedThumbwheel {
@@ -638,9 +639,11 @@ async fn arm_crown(
     };
     let crown = Crown::new(Arc::clone(channel), device_index, info.index);
     let mode = crown.get_mode().await?;
+    let info = crown.get_info().await?;
     let crown = armed.crown.insert(ArmedCrown {
         crown,
         ratcheted: mode.ratchet_mode == RatchetMode::Ratchet,
+        resolution: openlogi_core::rotary::RotationResolution::new(info.ratchets, info.slots),
     });
     crown
         .crown

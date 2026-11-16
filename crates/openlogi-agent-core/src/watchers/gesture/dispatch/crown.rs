@@ -59,9 +59,52 @@ pub(super) struct CrownFunctions {
 impl CrownFunctions {
     pub(super) fn cancel(&mut self, parent: &HidppSessionId, outputs: &GestureOutputs) {
         if let Some(session) = self.sessions.remove(parent) {
-            outputs.actions.cancel_hidpp_session(&session.output);
+            outputs.cancel_session(&session.output);
         }
         outputs.crown.cancel(parent);
+    }
+
+    pub(super) fn rotation_context(
+        &self,
+        parent: &HidppSessionId,
+    ) -> Option<(HidppSessionId, CrownFunctionId, bool)> {
+        self.sessions.get(parent).map(|session| {
+            (
+                session.output.clone(),
+                session.selected.clone(),
+                session.pressed,
+            )
+        })
+    }
+
+    pub(super) fn feel(
+        &self,
+        parent: &HidppSessionId,
+        policy: &CrownDispatch,
+        config_key: &str,
+    ) -> openlogi_core::rotary::TactileMode {
+        let inherited = policy.profile.feel();
+        if !policy.profile.is_enabled() {
+            return inherited;
+        }
+        let selected = self
+            .sessions
+            .get(parent)
+            .map(|session| &session.selected)
+            .or_else(|| {
+                self.remembered
+                    .get(&(config_key.to_owned(), policy.scope.clone()))
+            });
+        policy
+            .profile
+            .functions()
+            .iter()
+            .find(|function| Some(function.id()) == selected)
+            .or_else(|| policy.profile.functions().first())
+            .map_or(inherited, |function| match function.feel() {
+                openlogi_core::rotary::TactileMode::Inherit => inherited,
+                mode => mode,
+            })
     }
 
     /// Consume only Crown input in function mode. Direct mode is dispatched
@@ -77,7 +120,7 @@ impl CrownFunctions {
         let Some(policy) = &plan.crown else {
             return false;
         };
-        if !is_crown_input(input) {
+        if !policy.profile.is_enabled() || !is_crown_input(input) {
             return false;
         }
         let profile_key = (plan.config_key.clone(), policy.scope.clone());
@@ -115,7 +158,7 @@ impl CrownFunctions {
 
 fn is_crown_input(input: CapturedInput) -> bool {
     match input {
-        CapturedInput::CrownTap | CapturedInput::CrownRotation { .. } => true,
+        CapturedInput::CrownTap | CapturedInput::CrownRotation(_) => true,
         CapturedInput::ButtonDown(button)
         | CapturedInput::ButtonUp(button)
         | CapturedInput::ButtonPulse(button) => {
@@ -137,8 +180,8 @@ fn handle_input(
     match input {
         CapturedInput::ButtonDown(ButtonId::CrownTouch) => session.touched = true,
         CapturedInput::ButtonUp(ButtonId::CrownTouch) => session.touched = false,
-        CapturedInput::CrownRotation { .. } => {
-            if session.pressed {
+        CapturedInput::CrownRotation(motion) => {
+            if session.pressed && (motion.slots != 0 || motion.ratchets != 0) {
                 session.selection_press = SelectionPress::Consumed;
             }
         }
@@ -200,7 +243,7 @@ fn select_function(
         SelectionDirection::Backward => (index + functions.len() - 1) % functions.len(),
     };
     if let Some(next) = functions.get(next) {
-        outputs.actions.cancel_hidpp_session(&session.output);
+        outputs.cancel_session(&session.output);
         session.output = HidppSessionId::new(parent.device_key());
         session.selected = next.id().clone();
     }

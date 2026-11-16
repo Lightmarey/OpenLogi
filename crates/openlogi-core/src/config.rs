@@ -69,7 +69,7 @@ use crate::binding::{Binding, ButtonId, GestureDirection};
 /// persisted shape or enum vocabulary changes; readers inspect this value
 /// before consuming the rest of the file.
 ///
-/// v12 adds Craft Crown input bindings and per-application function profiles.
+/// v12 adds Craft Crown bindings, per-application functions and calibrated tactile/rotation settings.
 ///
 /// v11 adds the `[flow]` section for cross-machine device handoff. Nothing
 /// older needs migrating, and a file without it loads as disabled Flow. The

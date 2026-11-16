@@ -357,6 +357,7 @@ pub struct CaptureRestorePlan {
     spy: Option<SpyRestore>,
     g_keys: Option<GKeysRestore>,
     crown_index: Option<u8>,
+    crown_mode: Option<crate::crown::RatchetMode>,
 }
 
 impl fmt::Debug for CaptureRestorePlan {
@@ -374,6 +375,7 @@ impl fmt::Debug for CaptureRestorePlan {
             .field("host_mode", &self.spy.is_some())
             .field("g_key_row", &self.g_keys.is_some())
             .field("has_crown", &self.crown_index.is_some())
+            .field("crown_mode", &self.crown_mode)
             .finish()
     }
 }
@@ -430,6 +432,12 @@ impl RestorePlan for CaptureRestorePlan {
             // ratchet mode and every timing parameter unchanged.
             restored &= restore_result(crown.set_reporting(ReportingMode::Hid).await, "crown");
         }
+        if let Some(mode) = self.crown_mode {
+            restored &= restore_result(
+                crate::crown::set_mode_on(current, mode).await.map(|_| ()),
+                "Crown tactile mode",
+            );
+        }
         restored
     }
 }
@@ -446,6 +454,31 @@ pub type CaptureSessionOutcome = RestoreOutcome<CaptureRestorePlan>;
 pub type CaptureSessionFailure = SessionFailure<CaptureError, CaptureRestorePlan>;
 
 impl PendingCaptureRestore {
+    /// Attach a tactile restore to this session's existing firmware debt.
+    #[must_use]
+    pub fn with_crown_mode(mut self, mode: crate::crown::RatchetMode) -> Self {
+        self.plan_mut().crown_mode = Some(mode);
+        self
+    }
+
+    /// Retain a tactile-only restore after a failed teardown or disconnect.
+    #[must_use]
+    pub fn crown_mode(retired: &SharedChannel, mode: crate::crown::RatchetMode) -> Self {
+        Self::owing(
+            retired,
+            CaptureRestorePlan {
+                reprog: None,
+                thumb: None,
+                main_wheel: None,
+                spy: None,
+                g_keys: None,
+                crown_index: None,
+                crown_mode: Some(mode),
+            },
+        )
+        .allow_current_channel()
+    }
+
     /// Token aimed at `route` whose retry writes nothing and completes once that route is current.
     #[must_use]
     pub fn detached(route: DeviceRoute) -> Self {
@@ -458,6 +491,7 @@ impl PendingCaptureRestore {
                 spy: None,
                 g_keys: None,
                 crown_index: None,
+                crown_mode: None,
             },
         )
     }
@@ -491,6 +525,7 @@ impl PendingCaptureRestore {
                 spy,
                 g_keys,
                 crown_index,
+                crown_mode: None,
             },
         ))
     }

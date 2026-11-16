@@ -92,6 +92,12 @@ impl GestureOutputs {
         }
     }
 
+    fn post_crown_scroll(&self, session: &HidppSessionId, delta: ScrollDelta) {
+        if !self.scroll.try_crown_scroll(session, delta) {
+            openlogi_inject::post_scroll(delta);
+        }
+    }
+
     /// Post a diverted main wheel's scroll, eased by the scroll runtime
     /// under its device's resolved momentum-scrolling settings.
     fn post_main_wheel_scroll(
@@ -256,8 +262,17 @@ async fn complete_session(
     physical_key: PhysicalDeviceKey,
     session: HidppSessionId,
     diverted: DivertedButtonRecord,
+    crown_mode: Option<crate::hardware::crown::CrownModeTask>,
 ) {
-    let pending_restore = settle_capture_task(session_task, "gesture").await;
+    let mut pending_restore = settle_capture_task(session_task, "gesture").await;
+    if let Some(task) = crown_mode
+        && let Some((channel, mode)) = task.finish().await
+    {
+        pending_restore = Some(pending_restore.map_or_else(
+            || PendingCaptureRestore::crown_mode(&channel, mode),
+            |pending| pending.with_crown_mode(mode),
+        ));
+    }
     // Use the same channel as input so completion follows every diverted
     // report accepted before the listener was dropped.
     report_done_after_inputs(
@@ -340,6 +355,7 @@ fn reconcile_session(
         }
         let config_key = session.dispatch().config_key.clone();
         session.rekey(&config_key);
+        dispatcher.refresh_crown_mode(session.id(), session.dispatch());
     }
 }
 
@@ -565,7 +581,18 @@ impl GestureManagerState {
                 continue;
             };
             let id = HidppSessionId::new(&plan.dispatch.config_key);
-            let session = spawn_session(id, plan.clone(), session_lease, channels);
+            let crown_mode = if plan.dispatch.crown.is_some() || plan.target.spec.capture_crown {
+                let (handle, task) = crate::hardware::crown::CrownModeTask::spawn(
+                    channels.access.op(&plan.target.route),
+                    Arc::clone(&session_lease),
+                );
+                self.input_dispatcher
+                    .register_crown_mode(&id, handle, &plan.dispatch);
+                Some(task)
+            } else {
+                None
+            };
+            let session = spawn_session(id, plan.clone(), session_lease, channels, crown_mode);
             self.slots
                 .insert(key.clone(), GestureSlot::running(session));
         }
@@ -633,6 +660,7 @@ impl GestureManagerState {
                 };
                 let recovery_finished = slot.recovery().is_some_and(CaptureRecovery::is_empty);
                 self.input_dispatcher.cancel_session(&dispatch_session);
+                self.input_dispatcher.retire_crown_mode(&dispatch_session);
                 if unexpected && device_io_allowed {
                     warn!(
                         key = key.as_str(),
@@ -818,6 +846,7 @@ fn spawn_session(
     plan: DeviceCapturePlan,
     lease: Arc<SessionReceiverLease>,
     channels: &SessionChannels,
+    crown_mode: Option<crate::hardware::crown::CrownModeTask>,
 ) -> RunningSession {
     let DeviceCapturePlan {
         target, dispatch, ..
@@ -880,6 +909,7 @@ fn spawn_session(
         done_key,
         done_id,
         diverted,
+        crown_mode,
     ));
     CaptureSession::active(id, target, dispatch, stop_tx)
 }

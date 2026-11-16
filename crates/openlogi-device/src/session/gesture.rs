@@ -131,12 +131,7 @@ pub enum CapturedInput {
     CrownTap,
     /// Raw signed Crown movement before discrete action pulses are expanded.
     /// Preserves movement between ratchets without treating it as a discrete pulse.
-    CrownRotation {
-        /// Fine relative slot count.
-        slots: i8,
-        /// Relative ratchet count, measuring the same movement.
-        ratchets: i8,
-    },
+    CrownRotation(crate::crown::CrownMotion),
 }
 
 /// HID++-divertable standard buttons: the `0x1b04` control ID and the

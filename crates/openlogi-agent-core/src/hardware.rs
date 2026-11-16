@@ -38,9 +38,10 @@ use tracing::{debug, info, warn};
 use crate::capture_plan::SharedCapturePlans;
 use crate::dpi::DpiBeforeShift;
 use crate::pointer_speed::SpeedTarget;
-use crate::receiver_access::ReceiverAccess;
+use crate::receiver_access::{ReceiverAccess, SessionReceiverLease};
 
 mod context;
+pub(crate) mod crown;
 mod disable_keys;
 mod light;
 mod rgb_control;
@@ -276,6 +277,7 @@ pub(crate) fn known_unit(unit: [u8; 4]) -> Option<[u8; 4]> {
 /// [`crate::orchestrator::SharedHandles::keyboard_device`] — the receiver-side
 /// counterpart of `openlogi_hid::write::with_route`'s "boilerplate-eater"
 /// pattern, applied to an already-open channel instead of a fresh one.
+#[derive(Clone)]
 pub struct DeviceOp {
     access: DeviceAccess,
     route: DeviceRoute,
@@ -392,8 +394,26 @@ impl DeviceOp {
         if !self.access.device_io.allows_io() {
             return Err(WriteError::DeviceNotFound);
         }
+        let lease = self.access.receiver_access.acquire_for_io().await;
+        self.run_in_session(op, &lease, f).await
+    }
+
+    /// Use the capture epoch's existing receiver lease through cleanup.
+    /// Reacquiring behind a queued exclusive request would wait on this lease.
+    pub(crate) async fn run_in_session<F, Fut, T>(
+        self,
+        op: HidppOperation,
+        _lease: &SessionReceiverLease,
+        f: F,
+    ) -> Result<T, WriteError>
+    where
+        F: FnOnce(SharedChannel) -> Fut,
+        Fut: Future<Output = Result<T, WriteError>>,
+    {
+        if !self.access.device_io.allows_io() {
+            return Err(WriteError::DeviceNotFound);
+        }
         let turn = self.access.transport_turns.turn_for(&self.route);
-        let _lease = self.access.receiver_access.acquire_for_io().await;
         after_transport_turn(&turn, async {
             timed(op, async { f(self.reach(op).await?).await }).await
         })

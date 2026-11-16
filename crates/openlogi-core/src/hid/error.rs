@@ -365,6 +365,10 @@ pub enum HidppOperation {
     /// Write the `0x8300` sidetone level. Appended last — variant order is
     /// wire format.
     WriteSidetone,
+    /// Read Crown capabilities and its confirmed tactile mode.
+    ReadCrown,
+    /// Write and read back Crown tactile mode.
+    WriteCrown,
 }
 
 /// HID++ feature error kind in a serializable wire-safe form.

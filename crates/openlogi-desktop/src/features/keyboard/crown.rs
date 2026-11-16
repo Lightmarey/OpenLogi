@@ -22,6 +22,8 @@ use openlogi_core::crown::{
     MAX_FUNCTIONS,
 };
 
+use openlogi_core::rotary::{RotarySensitivity, RotarySettings, TactileMode};
+
 mod binding;
 #[cfg(test)]
 mod tests;
@@ -57,10 +59,27 @@ impl SelectItem for ControlItem {
     }
 }
 
+#[derive(Clone)]
+struct FeelItem(TactileMode);
+
+impl SelectItem for FeelItem {
+    type Value = TactileMode;
+    fn title(&self) -> SharedString {
+        rust_i18n::t!(self.0.translation_key()).into_owned().into()
+    }
+    fn value(&self) -> &TactileMode {
+        &self.0
+    }
+}
+
 pub(super) struct CrownEditor {
     selected: Option<CrownFunctionId>,
     context: Option<(String, Option<String>)>,
     name: Entity<InputState>,
+    feel: Entity<SelectState<Vec<FeelItem>>>,
+    speed: Entity<InputState>,
+    inverted: bool,
+    loaded_rotation: Option<(Option<CrownFunctionId>, TactileMode, RotarySettings)>,
     loaded_name: Option<(CrownFunctionId, String)>,
     control: Entity<SelectState<Vec<ControlItem>>>,
     trigger: Entity<SelectState<Vec<TriggerItem>>>,
@@ -75,6 +94,15 @@ pub(super) struct CrownEditor {
 impl CrownEditor {
     pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let name = cx.new(|cx| InputState::new(window, cx));
+        let speed = cx.new(|cx| InputState::new(window, cx));
+        let feel = cx.new(|cx| {
+            SelectState::new(
+                TactileMode::ALL.map(FeelItem).to_vec(),
+                Some(IndexPath::default()),
+                window,
+                cx,
+            )
+        });
         let control = cx.new(|cx| {
             SelectState::new(
                 ButtonId::CROWN.map(ControlItem).to_vec(),
@@ -124,6 +152,10 @@ impl CrownEditor {
             selected: None,
             context: None,
             name,
+            feel,
+            speed,
+            inverted: false,
+            loaded_rotation: None,
             loaded_name: None,
             control,
             trigger,
@@ -148,6 +180,7 @@ impl CrownEditor {
             self.loaded_name = None;
             self.custom = None;
             self.loaded_trigger = None;
+            self.loaded_rotation = None;
         }
         if !profile
             .functions()
@@ -176,6 +209,36 @@ impl CrownEditor {
                 );
             });
             self.loaded_name = name;
+        }
+        let function = profile
+            .is_enabled()
+            .then(|| {
+                self.selected.as_ref().and_then(|id| {
+                    profile
+                        .functions()
+                        .iter()
+                        .find(|function| function.id() == id)
+                })
+            })
+            .flatten();
+        let rotation = (
+            function.map(|function| function.id().clone()),
+            function.map_or_else(|| profile.feel(), CrownFunction::feel),
+            function.map_or_else(|| profile.rotation(), CrownFunction::rotation),
+        );
+        if self.loaded_rotation.as_ref() != Some(&rotation) {
+            self.inverted = rotation.2.inverted;
+            self.speed.update(cx, |input, cx| {
+                input.set_value(rotation.2.sensitivity.percent().to_string(), window, cx);
+            });
+            let index = TactileMode::ALL
+                .iter()
+                .position(|mode| *mode == rotation.1)
+                .unwrap_or(0);
+            self.feel.update(cx, |select, cx| {
+                select.set_selected_index(Some(IndexPath::new(index)), window, cx);
+            });
+            self.loaded_rotation = Some(rotation);
         }
         let trigger = profile.selection_trigger();
         if self.loaded_trigger != Some(trigger) || self.loaded_mode != Some(profile.is_enabled()) {
@@ -540,6 +603,92 @@ impl CrownEditor {
 }
 
 impl CrownEditor {
+    fn save_rotation(&mut self, cx: &mut Context<Self>) {
+        let speed = self
+            .speed
+            .read(cx)
+            .value()
+            .parse::<u16>()
+            .ok()
+            .and_then(|value| RotarySensitivity::new(value).ok());
+        let Some(sensitivity) = speed else {
+            self.error = Some(tr!("keyboard.crown_speed_invalid").to_string());
+            cx.notify();
+            return;
+        };
+        let Some(state) = AppState::try_read(cx) else {
+            return;
+        };
+        if state.crown_editing_context() != self.context {
+            return;
+        }
+        let mut profile = state.crown_profile();
+        let mode = self
+            .feel
+            .read(cx)
+            .selected_value()
+            .copied()
+            .unwrap_or_default();
+        let rotation = RotarySettings::default()
+            .with_sensitivity(sensitivity)
+            .with_inverted(self.inverted);
+        if profile.is_enabled() {
+            let mut functions = profile.functions().to_vec();
+            if let Some(function) = functions
+                .iter_mut()
+                .find(|function| Some(function.id()) == self.selected.as_ref())
+            {
+                function.set_feel(mode);
+                function.set_rotation(rotation);
+            }
+            if let Err(error) = profile.replace_functions(functions) {
+                self.error = Some(error.to_string());
+                cx.notify();
+                return;
+            }
+        } else {
+            profile.set_feel(mode);
+            profile.set_rotation(rotation);
+        }
+        self.commit(profile, cx);
+    }
+
+    fn rotation_controls(&self, cx: &mut Context<Self>) -> gpui::Div {
+        v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(div().text_caption().child(tr!("keyboard.crown_feel")))
+                    .child(control_select(&self.feel).flex_1()),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_caption()
+                            .child(tr!("keyboard.crown_scroll_speed")),
+                    )
+                    .child(control_input(&self.speed).flex_1()),
+            )
+            .child(
+                Toggle::new("crown-invert")
+                    .label(tr!("keyboard.crown_reverse_rotation"))
+                    .selected(self.inverted)
+                    .on_change(cx.listener(|this, value, _, cx| {
+                        this.inverted = *value;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                control_button("crown-save-rotation")
+                    .debug_selector(|| "crown-save-rotation".into())
+                    .label(tr!("keyboard.crown_save_rotation"))
+                    .on_click(cx.listener(|this, _, _, cx| this.save_rotation(cx))),
+            )
+    }
+
     fn settings_content(&self, profile: &CrownProfile, cx: &mut Context<Self>) -> gpui::Div {
         let pal = theme::palette(cx);
         v_flex()
@@ -596,6 +745,7 @@ impl CrownEditor {
                     .label(tr!("keyboard.crown_edit_binding"))
                     .on_click(cx.listener(|this, _, window, cx| this.open_binding(window, cx))),
             )
+            .child(self.rotation_controls(cx))
     }
 }
 

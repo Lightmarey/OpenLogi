@@ -1,0 +1,19 @@
+id: core-rotary-scroll-owner
+language: rust
+severity: error
+message: Use openlogi_core::rotary::ScrollDirection for rotary action classification.
+files:
+  - crates/openlogi-agent-core/**/*.rs
+rule:
+  all:
+    - kind: match_arm
+    - has:
+        any:
+          - pattern: Action::ScrollUp
+          - pattern: Action::ScrollDown
+          - pattern: Action::HorizontalScrollLeft
+          - pattern: Action::HorizontalScrollRight
+        stopBy: end
+    - has:
+        pattern: Some($DIRECTION)
+        stopBy: end

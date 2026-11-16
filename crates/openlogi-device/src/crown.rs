@@ -10,7 +10,44 @@ use hidpp::{
 
 pub use hidpp::feature::crown::{
     ActivityState, ButtonState, CrownGesture, CrownMode, CrownUpdate, RatchetMode, ReportingMode,
+    RotationState,
 };
+
+/// One raw physical movement, shared by action, scrolling and application dispatch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CrownMotion {
+    /// Sensor slots, with the firmware's original sign.
+    pub slots: i8,
+    /// Detents measuring the same movement.
+    pub ratchets: i8,
+    /// Calibration measured by getInfo.
+    pub resolution: openlogi_core::rotary::RotationResolution,
+    /// Physical mode observed when capture armed.
+    pub ratcheted: bool,
+    /// Firmware rotation lifecycle.
+    pub phase: RotationState,
+    /// Signed sensor slots per second.
+    pub speed: i16,
+    /// Mechanical press observed for this report before its release edge.
+    pub pressed: bool,
+}
+
+impl CrownMotion {
+    /// Construct uncalibrated motion for callers without a device getInfo result.
+    #[must_use]
+    pub const fn new(slots: i8, ratchets: i8, ratcheted: bool) -> Self {
+        Self {
+            slots,
+            ratchets,
+            ratcheted,
+            resolution: openlogi_core::rotary::RotationResolution::UNKNOWN,
+            phase: RotationState::Inactive,
+            speed: 0,
+            pressed: false,
+        }
+    }
+}
 
 /// The Craft crown's driving feature ID.
 pub const FEATURE_ID: u16 = 0x4600;
@@ -37,6 +74,11 @@ impl Crown {
         self.feature_index
     }
 
+    /// Read sensor resolution and physical control capabilities.
+    pub async fn get_info(&self) -> Result<hidpp::feature::crown::CrownInfo, Hidpp20Error> {
+        self.inner.get_info().await
+    }
+
     /// Read the reporting and ratchet mode without changing the device.
     pub async fn get_mode(&self) -> Result<CrownMode, Hidpp20Error> {
         self.inner.get_mode().await
@@ -54,6 +96,68 @@ impl Crown {
             })
             .await
     }
+}
+
+/// Open the Crown wrapper through the inventory-owned connection.
+async fn on_channel(shared: &crate::SharedChannel) -> Result<Arc<CrownFeature>, crate::WriteError> {
+    let index = shared.device_index();
+    let mut device = hidpp::device::Device::new(Arc::clone(shared.channel()), index)
+        .await
+        .map_err(|_| crate::WriteError::DeviceUnreachable { index })?;
+    crate::write::open_feature::<CrownFeature>(&mut device).await
+}
+
+/// Read tactile mode through an existing connection.
+pub async fn get_mode_on(shared: &crate::SharedChannel) -> Result<RatchetMode, crate::WriteError> {
+    let feature = on_channel(shared).await?;
+    feature
+        .get_mode()
+        .await
+        .map(|mode| mode.ratchet_mode)
+        .map_err(|error| {
+            crate::write::classify_hidpp_error(error, crate::HidppOperation::ReadCrown, FEATURE_ID)
+        })
+}
+
+/// Change tactile behavior while retaining reporting and gesture timing.
+/// A fresh readback is required because setMode only echoes request sentinels.
+pub async fn set_mode_on(
+    shared: &crate::SharedChannel,
+    mode: RatchetMode,
+) -> Result<RatchetMode, crate::WriteError> {
+    let feature = on_channel(shared).await?;
+    let classify = |error| {
+        crate::write::classify_hidpp_error(error, crate::HidppOperation::WriteCrown, FEATURE_ID)
+    };
+    let info = feature.get_info().await.map_err(classify)?;
+    if !info
+        .controls
+        .contains(hidpp::feature::crown::CrownControlCapabilities::MECHANIZED_RATCHET)
+    {
+        return Err(crate::WriteError::FeatureUnsupported {
+            feature_hex: FEATURE_ID,
+        });
+    }
+    let before = feature.get_mode().await.map_err(classify)?;
+    if before.ratchet_mode != mode {
+        feature
+            .set_mode(hidpp::feature::crown::SetCrownMode {
+                diverting: None,
+                ratchet_mode: Some(mode),
+                rotation_timeout: None,
+                short_long_timeout: None,
+                double_tap_speed: None,
+            })
+            .await
+            .map_err(classify)?;
+    }
+    let after = feature.get_mode().await.map_err(classify)?.ratchet_mode;
+    if after != mode {
+        return Err(crate::WriteError::Hidpp(
+            "Crown tactile mode did not match its readback".into(),
+        ));
+    }
+    Ok(after)
 }
 
 /// Attribute a crown notification, rejecting replies and other devices/features.

@@ -289,6 +289,21 @@ impl ScrollInputHandle {
     /// hook, there is no physical event to pass through.
     #[must_use]
     pub(crate) fn try_hidpp_scroll(&self, session: &HidppSessionId, delta: ScrollDelta) -> bool {
+        self.try_rotary_scroll(session, delta, HidppWheel::Thumb)
+    }
+
+    /// Queue a Crown impulse with independent continuity from other wheels.
+    #[must_use]
+    pub(crate) fn try_crown_scroll(&self, session: &HidppSessionId, delta: ScrollDelta) -> bool {
+        self.try_rotary_scroll(session, delta, HidppWheel::Crown)
+    }
+
+    fn try_rotary_scroll(
+        &self,
+        session: &HidppSessionId,
+        delta: ScrollDelta,
+        wheel: HidppWheel,
+    ) -> bool {
         if !self.accepting.load(Ordering::Acquire) {
             return false;
         }
@@ -302,11 +317,7 @@ impl ScrollInputHandle {
         ) else {
             return false;
         };
-        self.try_enqueue(
-            ScrollSource::Hidpp(session.clone(), HidppWheel::Thumb),
-            impulse,
-            output,
-        )
+        self.try_enqueue(ScrollSource::Hidpp(session.clone(), wheel), impulse, output)
     }
 
     /// Queue one diverted main-wheel impulse from an active HID++ session.
@@ -674,6 +685,27 @@ mod tests {
         assert!(!input.try_hook_scroll(ScrollDelta::pixels(0.0, 1.0)));
         assert!(input.try_hook_scroll(ScrollDelta::wheel_ticks(0.0, 1.0)));
         assert!(!input.try_hook_scroll(ScrollDelta::wheel_ticks(0.0, 1.0)));
+    }
+
+    #[test]
+    fn crown_and_thumbwheel_have_independent_sources_and_exact_fractional_input() {
+        let (input, receiver, _controls) = standalone_input(4, preferences(true, 14));
+        let session = HidppSessionId::new("rotary-device");
+        let delta = ScrollDelta::wheel_ticks(0.0, 1.0 / 6.0);
+        assert!(input.try_crown_scroll(&session, delta));
+        assert!(input.try_hidpp_scroll(&session, delta));
+        let crown = queued_input(&receiver);
+        let thumb = queued_input(&receiver);
+        assert_eq!(
+            crown.source,
+            ScrollSource::Hidpp(session.clone(), HidppWheel::Crown)
+        );
+        assert_eq!(
+            thumb.source,
+            ScrollSource::Hidpp(session, HidppWheel::Thumb)
+        );
+        assert_eq!(crown.impulse.y, 1.0 / 6.0);
+        assert_eq!(thumb.impulse, crown.impulse);
     }
 
     #[test]

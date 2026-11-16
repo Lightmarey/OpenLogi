@@ -87,7 +87,7 @@ pub struct DispatchPlan {
     pub(crate) pointer: Option<PointerSelection>,
     /// Bindings used while G-Shift is held.
     pub shift_bindings: BTreeMap<ButtonId, Binding>,
-    /// Effective enabled Crown profile, or direct binding mode.
+    /// Effective Crown profile, including direct-mode tactile and rotation settings.
     pub crown: Option<CrownDispatch>,
 }
 
@@ -476,12 +476,14 @@ fn crown_plan(
 ) -> (bool, Option<CrownDispatch>) {
     let crown = config.devices.get(key).and_then(|device| {
         let (scope, profile) = device.crown.resolve(&config.apps, app);
-        profile.is_enabled().then(|| CrownDispatch {
+        (!device.crown.is_default()).then(|| CrownDispatch {
             scope: scope.map(str::to_owned),
             profile: profile.clone(),
         })
     });
-    let capture = crown.is_some()
+    let capture = crown
+        .as_ref()
+        .is_some_and(|policy| policy.profile.is_enabled())
         || ButtonId::CROWN.iter().any(|button| {
             bindings.get(button).is_some_and(|binding| match binding {
                 Binding::LongPress(pair) => {
@@ -802,7 +804,7 @@ mod tests {
         assert!(config.devices["craft"].bindings.is_empty());
         let zen = plan_for_device(&config, "craft", route(), Some("zen"), 0, true);
         assert!(!zen.target.spec.capture_crown);
-        assert!(zen.dispatch.crown.is_none());
+        assert!(!zen.dispatch.crown.as_ref().unwrap().profile.is_enabled());
         let blender = plan_for_device(&config, "craft", route(), Some("blender"), 0, true);
         assert!(blender.target.spec.capture_crown);
         assert_eq!(blender.dispatch.crown.unwrap().scope, None);

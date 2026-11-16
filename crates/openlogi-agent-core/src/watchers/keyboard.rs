@@ -219,7 +219,7 @@ fn dispatch_input(
         | CapturedInput::MainWheel { .. }
         | CapturedInput::HostModeEntered
         | CapturedInput::CrownTap
-        | CapturedInput::CrownRotation { .. } => {}
+        | CapturedInput::CrownRotation(_) => {}
     }
 }
 

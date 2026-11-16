@@ -389,6 +389,7 @@ async fn a_session_body_that_panics_still_reports_done_after_its_inputs() {
         key.clone(),
         id.clone(),
         diverted_record(&id, &SharedHookMaps::default()),
+        None,
     )
     .await;
 

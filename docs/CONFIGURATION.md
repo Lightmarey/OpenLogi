@@ -706,6 +706,20 @@ through the existing action catalog, shortcut recorder, application target and
 shell-command fields. The input lifecycle is validated by the editor, configuration
 loading and the atomic save owner.
 
+**Rotation feel** selects smooth rotation, physical ratchets, or the inherited
+mode. In direct-binding mode it configures the current device/application profile.
+In function mode it configures the selected function, whose inherited setting
+resolves through the profile. Software reads the original mode before its first
+write, confirms changes by reading them back and restores its tactile lease when
+capture ends. A failed restore stays queued across device reconnection.
+
+**Scroll speed (%)** scales rotation output from 1 to 1000 percent, with 100 as
+native speed. **Reverse rotation** exchanges the directional bindings. Scroll
+actions preserve fractional sensor motion using the Crown's reported slots and
+ratchets per revolution. Other actions retain discrete steps, with fractional
+progress kept only for their active function. Save these settings with **Save
+rotation settings**.
+
 The default **Press and release** selector reserves the press action. A press that
 rotates, including movement shorter than one detent, leaves the current function
 selected. **Touch gesture Tap** selects on a clean firmware tap and enables press

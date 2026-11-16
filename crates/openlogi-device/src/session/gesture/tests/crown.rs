@@ -12,6 +12,7 @@ async fn crown_capture_changes_only_reporting_and_restores_even_an_old_diversion
             (0, 1) => response[4] = 4,
             (0, 0) if request[4..6] == [0x46, 0x00] => response[4] = 9,
             (0, 0) => {} // No mouse controls on this fixture.
+            (9, 0) => response[4..10].copy_from_slice(&[4, 15, 0, 120, 0, 20]),
             (9, 1) => response[4..9].copy_from_slice(&[2, 2, 17, 29, 41]),
             (9, 2) => return Some(request.to_vec()),
             _ => panic!("unexpected crown request: {request:02x?}"),

@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::app::profile_key_for;
 use crate::binding::{Action, ActionRingIcon, Binding, ButtonId};
+use crate::rotary::{RotarySettings, TactileMode};
 
 /// A read-only feedback source understood by a native Crown presenter.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +199,8 @@ pub struct CrownFunction {
     name: String,
     icon: ActionRingIcon,
     bindings: BTreeMap<CrownControl, Binding>,
+    feel: TactileMode,
+    rotation: RotarySettings,
 }
 
 #[derive(Deserialize)]
@@ -208,6 +211,10 @@ struct RawFunction {
     icon: ActionRingIcon,
     #[serde(default)]
     bindings: BTreeMap<CrownControl, Binding>,
+    #[serde(default)]
+    feel: TactileMode,
+    #[serde(default)]
+    rotation: RotarySettings,
 }
 
 impl TryFrom<RawFunction> for CrownFunction {
@@ -215,6 +222,8 @@ impl TryFrom<RawFunction> for CrownFunction {
 
     fn try_from(raw: RawFunction) -> Result<Self, Self::Error> {
         let mut function = Self::new(raw.id, &raw.name, raw.icon)?;
+        function.feel = raw.feel;
+        function.rotation = raw.rotation;
         for (control, binding) in raw.bindings {
             function.set_binding(control, binding)?;
         }
@@ -230,6 +239,8 @@ impl CrownFunction {
             name: String::new(),
             icon,
             bindings: BTreeMap::new(),
+            feel: TactileMode::default(),
+            rotation: RotarySettings::default(),
         };
         function.rename(name)?;
         Ok(function)
@@ -266,6 +277,28 @@ impl CrownFunction {
     /// Change the function's presentation icon.
     pub const fn set_icon(&mut self, icon: ActionRingIcon) {
         self.icon = icon;
+    }
+
+    /// Requested tactile mode; inheritance resolves through the active profile.
+    #[must_use]
+    pub const fn feel(&self) -> TactileMode {
+        self.feel
+    }
+
+    /// Set the function's tactile preference.
+    pub const fn set_feel(&mut self, feel: TactileMode) {
+        self.feel = feel;
+    }
+
+    /// Calibrated rotation settings for this function.
+    #[must_use]
+    pub const fn rotation(&self) -> RotarySettings {
+        self.rotation
+    }
+
+    /// Change calibrated rotation settings.
+    pub const fn set_rotation(&mut self, settings: RotarySettings) {
+        self.rotation = settings;
     }
 
     /// Resolve a control; absent entries explicitly do nothing.
@@ -317,6 +350,8 @@ pub struct CrownProfile {
     enabled: bool,
     functions: Vec<CrownFunction>,
     selection_trigger: CrownSelectionTrigger,
+    feel: TactileMode,
+    rotation: RotarySettings,
 }
 
 #[derive(Deserialize)]
@@ -327,6 +362,10 @@ struct RawProfile {
     functions: Vec<CrownFunction>,
     #[serde(default)]
     selection_trigger: CrownSelectionTrigger,
+    #[serde(default)]
+    feel: TactileMode,
+    #[serde(default)]
+    rotation: RotarySettings,
 }
 
 impl TryFrom<RawProfile> for CrownProfile {
@@ -335,6 +374,8 @@ impl TryFrom<RawProfile> for CrownProfile {
     fn try_from(raw: RawProfile) -> Result<Self, Self::Error> {
         let mut profile = Self::new(raw.enabled, raw.functions)?;
         profile.set_selection_trigger(raw.selection_trigger);
+        profile.feel = raw.feel;
+        profile.rotation = raw.rotation;
         Ok(profile)
     }
 }
@@ -353,6 +394,8 @@ impl CrownProfile {
             enabled,
             functions,
             selection_trigger: CrownSelectionTrigger::default(),
+            feel: TactileMode::default(),
+            rotation: RotarySettings::default(),
         })
     }
 
@@ -378,6 +421,28 @@ impl CrownProfile {
         self.selection_trigger = trigger;
     }
 
+    /// Base tactile preference, also used in direct-binding mode.
+    #[must_use]
+    pub const fn feel(&self) -> TactileMode {
+        self.feel
+    }
+
+    /// Set this profile's base tactile preference.
+    pub const fn set_feel(&mut self, feel: TactileMode) {
+        self.feel = feel;
+    }
+
+    /// Rotation settings used in direct-binding mode.
+    #[must_use]
+    pub const fn rotation(&self) -> RotarySettings {
+        self.rotation
+    }
+
+    /// Change direct-binding rotation settings.
+    pub const fn set_rotation(&mut self, settings: RotarySettings) {
+        self.rotation = settings;
+    }
+
     /// Controls that remain available for action bindings in this profile.
     pub fn binding_controls(&self) -> impl Iterator<Item = CrownControl> {
         CrownControl::ALL.into_iter().filter(|control| {
@@ -390,6 +455,8 @@ impl CrownProfile {
     pub fn replace_functions(&mut self, functions: Vec<CrownFunction>) -> Result<(), CrownError> {
         let mut replacement = Self::new(self.enabled, functions)?;
         replacement.selection_trigger = self.selection_trigger;
+        replacement.feel = self.feel;
+        replacement.rotation = self.rotation;
         *self = replacement;
         Ok(())
     }
@@ -435,6 +502,8 @@ impl Default for CrownProfile {
             id: CrownFunctionId(id.to_owned()),
             name: name.to_owned(),
             icon,
+            feel: TactileMode::default(),
+            rotation: RotarySettings::default(),
             bindings: BTreeMap::from([
                 (CrownControl::Left, Binding::Single(left)),
                 (CrownControl::Right, Binding::Single(right)),
@@ -446,6 +515,8 @@ impl Default for CrownProfile {
             enabled: false,
             functions,
             selection_trigger: CrownSelectionTrigger::default(),
+            feel: TactileMode::default(),
+            rotation: RotarySettings::default(),
         }
     }
 }

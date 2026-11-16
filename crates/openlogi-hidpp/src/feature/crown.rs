@@ -1,5 +1,5 @@
-//! Implements the `Crown` feature (ID `0x4600`) for the MX Master's rotary
-//! crown: reading its capabilities, configuring its mode (HID vs diverted,
+//! Implements the `Crown` feature (ID `0x4600`) for tactile rotary controls:
+//! reading its capabilities, configuring its mode (HID vs diverted,
 //! free vs ratchet, timeouts), and receiving diverted rotation/touch/button
 //! events.
 

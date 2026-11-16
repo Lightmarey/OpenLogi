@@ -130,7 +130,7 @@ impl WheelDirection {
         if distance == 0.0 {
             WheelOutput::Idle
         } else {
-            binding.output(distance)
+            WheelOutput::Scroll(binding.delta(distance))
         }
     }
 
@@ -235,37 +235,7 @@ struct DiscreteBinding {
     sensitivity: ThumbwheelSensitivity,
 }
 
-/// Axis and sign encoded by a continuous-scroll action.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ScrollBinding {
-    Up,
-    Down,
-    Right,
-    Left,
-}
-
-impl ScrollBinding {
-    fn from_action(action: &Action) -> Option<Self> {
-        match action {
-            Action::ScrollUp => Some(Self::Up),
-            Action::ScrollDown => Some(Self::Down),
-            Action::HorizontalScrollRight => Some(Self::Right),
-            Action::HorizontalScrollLeft => Some(Self::Left),
-            _ => None,
-        }
-    }
-
-    /// Convert positive distance into the configured axis and sign.
-    fn output(self, distance: f64) -> WheelOutput {
-        let delta = match self {
-            Self::Up => ScrollDelta::wheel_ticks(0.0, distance),
-            Self::Down => ScrollDelta::wheel_ticks(0.0, -distance),
-            Self::Right => ScrollDelta::wheel_ticks(distance, 0.0),
-            Self::Left => ScrollDelta::wheel_ticks(-distance, 0.0),
-        };
-        WheelOutput::Scroll(delta)
-    }
-}
+use openlogi_core::rotary::ScrollDirection as ScrollBinding;
 
 /// What advancing one direction should produce.
 #[derive(Clone, Copy, Debug, PartialEq)]

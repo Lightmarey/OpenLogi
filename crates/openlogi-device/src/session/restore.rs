@@ -64,6 +64,10 @@ impl<P: fmt::Debug> fmt::Debug for PendingRestore<P> {
 }
 
 impl<P> PendingRestore<P> {
+    pub(crate) fn plan_mut(&mut self) -> &mut P {
+        &mut self.plan
+    }
+
     /// Record that `plan` is owed to the device behind `retired`.
     pub(crate) fn owing(retired: &SharedChannel, plan: P) -> Self {
         Self {

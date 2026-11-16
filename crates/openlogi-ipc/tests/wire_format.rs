@@ -1533,6 +1533,29 @@ fn crown_observation_and_appended_rpc() {
 }
 
 #[test]
+fn crown_rotary_configuration_is_appended_and_round_trips() {
+    use openlogi_core::crown::{CrownFunction, CrownFunctionId, CrownProfile};
+    use openlogi_core::rotary::{RotarySensitivity, RotarySettings, TactileMode};
+    let mut function = CrownFunction::new(
+        CrownFunctionId::new("x".into()).unwrap(),
+        "X",
+        ActionRingIcon::Volume,
+    )
+    .unwrap();
+    function.set_feel(TactileMode::Ratchet);
+    function.set_rotation(
+        RotarySettings::default()
+            .with_sensitivity(RotarySensitivity::new(150).unwrap())
+            .with_inverted(true),
+    );
+    let mut profile = CrownProfile::new(true, vec![function]).unwrap();
+    profile.set_feel(TactileMode::Smooth);
+    assert_wire(&profile, "0101017801580f0002960100016400");
+    assert_wire(&openlogi_core::hid::HidppOperation::ReadCrown, "21");
+    assert_wire(&openlogi_core::hid::HidppOperation::WriteCrown, "22");
+}
+
+#[test]
 fn crown_input_names_are_wire_stable() {
     assert_wire(&ButtonId::CrownTouch, "0a43726f776e546f756368");
     assert_wire(&ButtonId::CrownPress, "0a43726f776e5072657373");

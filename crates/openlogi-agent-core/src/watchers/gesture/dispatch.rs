@@ -97,6 +97,11 @@ impl SessionWheels {
     }
 }
 
+struct CrownSteps {
+    output: HidppSessionId,
+    progress: HashMap<ButtonId, f64>,
+}
+
 /// Input routing plus the per-session state retained between
 /// captured events. Capture-session lifecycle remains owned by the parent.
 pub(super) struct InputDispatcher {
@@ -106,6 +111,8 @@ pub(super) struct InputDispatcher {
     held_presses: HeldPresses,
     shift_held: HeldShift,
     crown: crown::CrownFunctions,
+    crown_modes: HashMap<u64, crate::hardware::crown::CrownModeHandle>,
+    crown_steps: HashMap<u64, CrownSteps>,
 }
 
 impl InputDispatcher {
@@ -118,6 +125,34 @@ impl InputDispatcher {
             held_presses: HeldPresses::default(),
             shift_held: HeldShift::default(),
             crown: crown::CrownFunctions::default(),
+            crown_modes: HashMap::new(),
+            crown_steps: HashMap::new(),
+        }
+    }
+
+    pub(super) fn register_crown_mode(
+        &mut self,
+        session: &HidppSessionId,
+        mode: crate::hardware::crown::CrownModeHandle,
+        plan: &DispatchPlan,
+    ) {
+        self.crown_modes.insert(session.epoch(), mode);
+        self.refresh_crown_mode(session, plan);
+    }
+
+    pub(super) fn retire_crown_mode(&mut self, session: &HidppSessionId) {
+        self.crown_modes.remove(&session.epoch());
+    }
+
+    pub(super) fn refresh_crown_mode(&self, session: &HidppSessionId, plan: &DispatchPlan) {
+        if let Some(handle) = self.crown_modes.get(&session.epoch()) {
+            let feel = plan
+                .crown
+                .as_ref()
+                .map_or(openlogi_core::rotary::TactileMode::Inherit, |policy| {
+                    self.crown.feel(session, policy, &plan.config_key)
+                });
+            handle.request(feel);
         }
     }
 
@@ -130,6 +165,7 @@ impl InputDispatcher {
     /// Cancel every input lifecycle retained for one capture session.
     pub(super) fn cancel_session(&mut self, session: &HidppSessionId) {
         self.crown.cancel(session, &self.outputs);
+        self.crown_steps.remove(&session.epoch());
         self.outputs.cancel_session(session);
         self.wheels.cancel_session(session);
         self.held_presses.cancel_session(session);
@@ -223,11 +259,19 @@ impl InputDispatcher {
         input: CapturedInput,
         modifiers: openlogi_core::config::KeyModifiers,
     ) {
+        if let CapturedInput::CrownRotation(motion) = input {
+            self.crown
+                .dispatch(session, plan, input, modifiers, &self.outputs);
+            self.dispatch_crown_motion(session, plan, motion);
+            self.refresh_crown_mode(session, plan);
+            return;
+        }
         let key = session.device_key();
         if self
             .crown
             .dispatch(session, plan, input, modifiers, &self.outputs)
         {
+            self.refresh_crown_mode(session, plan);
             return;
         }
         match input {
@@ -314,7 +358,109 @@ impl InputDispatcher {
             CapturedInput::ButtonDiverted(_) => {
                 unreachable!("the session's forwarder records diverted buttons instead")
             }
-            CapturedInput::CrownTap | CapturedInput::CrownRotation { .. } => {}
+            CapturedInput::CrownTap | CapturedInput::CrownRotation(_) => {}
+        }
+    }
+
+    fn dispatch_crown_motion(
+        &mut self,
+        parent: &HidppSessionId,
+        plan: &DispatchPlan,
+        motion: openlogi_hid::crown::CrownMotion,
+    ) {
+        use openlogi_core::crown::CrownControl;
+        use openlogi_core::rotary::{RotarySettings, TactileMode, scroll_for_action};
+        let function =
+            self.crown
+                .rotation_context(parent)
+                .and_then(|(output, selected, pressed)| {
+                    let function = plan
+                        .crown
+                        .as_ref()?
+                        .profile
+                        .functions()
+                        .iter()
+                        .find(|function| function.id() == &selected)?;
+                    Some((output, function, pressed))
+                });
+        let (output, settings, pressed) = function.as_ref().map_or_else(
+            || {
+                (
+                    parent.clone(),
+                    plan.crown
+                        .as_ref()
+                        .map_or_else(RotarySettings::default, |policy| policy.profile.rotation()),
+                    motion.pressed,
+                )
+            },
+            |(output, function, pressed)| (output.clone(), function.rotation(), *pressed),
+        );
+        let ratcheted = self
+            .crown_modes
+            .get(&parent.epoch())
+            .and_then(crate::hardware::crown::CrownModeHandle::applied)
+            .map_or(motion.ratcheted, |mode| mode == TactileMode::Ratchet);
+        let steps = if ratcheted {
+            motion.ratchets
+        } else {
+            motion.slots
+        };
+        let direction = if motion.slots == 0 {
+            motion.ratchets
+        } else {
+            motion.slots
+        };
+        if direction == 0 {
+            return;
+        }
+        let positive = (direction > 0) != settings.inverted;
+        let control = match (pressed, positive) {
+            (false, false) => CrownControl::Left,
+            (false, true) => CrownControl::Right,
+            (true, false) => CrownControl::PressedLeft,
+            (true, true) => CrownControl::PressedRight,
+        };
+        let binding = function.as_ref().map_or_else(
+            || {
+                plan.bindings
+                    .get(&control.button())
+                    .cloned()
+                    .unwrap_or_else(|| Action::None.into())
+            },
+            |(_, function, _)| function.binding(control),
+        );
+        let action = binding.click_action();
+        let distance = if motion.slots == 0 {
+            f64::from(motion.ratchets.unsigned_abs())
+        } else {
+            f64::from(motion.slots.unsigned_abs()) * motion.resolution.native_per_increment()
+        } * settings.sensitivity.multiplier();
+        if let Some(delta) = scroll_for_action(&action, distance) {
+            self.outputs.post_crown_scroll(&output, delta);
+            return;
+        }
+        let accumulated = self
+            .crown_steps
+            .entry(parent.epoch())
+            .or_insert_with(|| CrownSteps {
+                output: output.clone(),
+                progress: HashMap::new(),
+            });
+        if accumulated.output != output {
+            accumulated.output = output.clone();
+            accumulated.progress.clear();
+        }
+        let progress = accumulated.progress.entry(control.button()).or_default();
+        *progress += f64::from(steps.unsigned_abs()) * settings.sensitivity.multiplier();
+        // An i8 report and validated speed bound this work to 1280 actions.
+        while *progress >= 1.0 {
+            *progress -= 1.0;
+            self.outputs.actions.dispatch_hidpp_button_pulse(
+                &output,
+                control.button(),
+                Some(&binding),
+                None,
+            );
         }
     }
 

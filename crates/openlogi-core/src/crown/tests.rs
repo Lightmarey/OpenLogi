@@ -3,6 +3,31 @@ use crate::binding::{KeyCombo, LongPressBinding};
 use crate::config::{Config, DeviceConfig};
 
 #[test]
+fn old_profiles_load_with_native_rotation_and_new_settings_survive_edits() {
+    use crate::rotary::{RotarySensitivity, RotarySettings, TactileMode};
+    let old = "enabled = true\n[[functions]]\nid = 'custom'\nname = 'Custom'\nicon = 'Volume'\n";
+    let mut profile: CrownProfile = toml::from_str(old).unwrap();
+    assert_eq!(profile.feel(), TactileMode::Inherit);
+    assert_eq!(profile.rotation(), RotarySettings::default());
+    profile.set_feel(TactileMode::Smooth);
+    let rotation = RotarySettings::default()
+        .with_sensitivity(RotarySensitivity::new(150).unwrap())
+        .with_inverted(true);
+    profile.set_rotation(rotation);
+    let mut functions = profile.functions().to_vec();
+    functions[0].set_feel(TactileMode::Ratchet);
+    functions[0].set_rotation(rotation);
+    profile.replace_functions(functions).unwrap();
+    let saved = toml::to_string(&profile).unwrap();
+    let reloaded: CrownProfile = toml::from_str(&saved).unwrap();
+    assert_eq!(reloaded, profile);
+    assert_eq!(reloaded.feel(), TactileMode::Smooth);
+    assert_eq!(reloaded.functions()[0].feel(), TactileMode::Ratchet);
+    toml::from_str::<CrownProfile>(&saved.replace("sensitivity = 150", "sensitivity = 0"))
+        .unwrap_err();
+}
+
+#[test]
 fn feedback_tracks_actions_rather_than_editable_names_and_icons() {
     let mut function = CrownProfile::default().functions()[0].clone();
     assert_eq!(function.feedback(), Some(CrownFeedback::SystemVolume));

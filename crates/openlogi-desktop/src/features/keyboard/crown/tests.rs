@@ -31,6 +31,48 @@ fn draw(cx: &mut VisualTestContext) {
     cx.update(|window, cx| window.draw(cx).clear(cx));
 }
 
+#[gpui::test]
+fn crown_rotation_settings_save_and_invalid_speed_preserves_the_saved_profile(
+    cx: &mut TestAppContext,
+) {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    let (view, cx, dir) = editor(cx);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.feel.update(cx, |select, cx| {
+                select.set_selected_index(Some(IndexPath::new(1)), window, cx);
+            });
+            view.speed
+                .update(cx, |speed, cx| speed.set_value("150", window, cx));
+        });
+    });
+    draw(cx);
+    click(cx, "crown-save-rotation");
+    let path = dir.path().join(openlogi_core::paths::CONFIG_FILE);
+    let saved = Config::load_from_path(&path).unwrap();
+    assert_eq!(saved.devices[KEY].crown.default.feel(), TactileMode::Smooth);
+    assert_eq!(
+        saved.devices[KEY]
+            .crown
+            .default
+            .rotation()
+            .sensitivity
+            .percent(),
+        150
+    );
+    let saved_bytes = std::fs::read(&path).unwrap();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.speed
+                .update(cx, |speed, cx| speed.set_value("0", window, cx));
+        });
+    });
+    draw(cx);
+    click(cx, "crown-save-rotation");
+    assert_eq!(std::fs::read(&path).unwrap(), saved_bytes);
+    view.read_with(cx, |view, _| assert!(view.error.is_some()));
+}
+
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     let bounds = cx
         .debug_bounds(selector)
