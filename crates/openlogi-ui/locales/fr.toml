@@ -396,6 +396,8 @@ momentum_use_general = "Utiliser les réglages généraux"
 momentum_override_count = "Souris avec leurs propres réglages : %{count}"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "Attribuer %{name}"
 bind_control_in_app = "Attribuer %{name} dans %{app}"
 unbound = "Non attribué"

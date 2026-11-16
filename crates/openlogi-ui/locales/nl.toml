@@ -396,6 +396,8 @@ momentum_use_general = "Algemene instellingen gebruiken"
 momentum_override_count = "Muizen met eigen instellingen: %{count}"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "%{name} toewijzen"
 bind_control_in_app = "%{name} toewijzen in %{app}"
 unbound = "Niet toegewezen"

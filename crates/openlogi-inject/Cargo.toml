@@ -15,9 +15,11 @@ shellexpand.workspace = true
 opener.workspace = true
 openlogi-core = { path = "../openlogi-core", version = "0.9.0" }
 tracing = { workspace = true }
+thiserror.workspace = true
 
 [dev-dependencies]
 serde = { workspace = true }
+tempfile = "3"
 tracing-subscriber = { workspace = true }
 
 [lints]
@@ -44,7 +46,7 @@ objc2-app-kit = { workspace = true, features = [
 ] }
 objc2-core-graphics = { workspace = true, features = ["CGDirectDisplay", "CGError", "CGEvent", "CGEventTypes"] }
 objc2-foundation = { workspace = true }
-objc2-io-kit = { workspace = true, features = ["std", "hid", "hidsystem"] }
+objc2-io-kit = { workspace = true, features = ["std", "hid", "hidsystem", "graphics", "libc"] }
 objc2-application-services = { workspace = true, features = ["std", "HIServices", "AXUIElement", "AXError", "libc"] }
 objc2-core-foundation = { workspace = true, features = ["std", "CFArray", "CFString", "CFData", "CFDictionary", "CFNumber", "CFUUID"] }
 block2 = { workspace = true }
@@ -62,3 +64,5 @@ windows-sys = { workspace = true, features = [
     # keys `SendInput` posts.
     "Win32_UI_WindowsAndMessaging",
 ] }
+serde.workspace = true
+wmi = { version = "0.18.4", default-features = false }

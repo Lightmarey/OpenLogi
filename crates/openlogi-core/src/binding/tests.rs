@@ -435,6 +435,8 @@ fn persisted_action_variant_names_are_stable() {
     actual.sort();
     let mut expected = [
         "AppExpose",
+        "BrightnessUp",
+        "BrightnessDown",
         "BrowserBack",
         "BrowserForward",
         "CaptureRegion",

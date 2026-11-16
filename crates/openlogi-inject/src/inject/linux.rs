@@ -51,6 +51,7 @@ pub(super) fn execute(action: &Action) {
         Effect::Native(native) => dispatch_native(action, native),
         Effect::Script(script) => super::dispatch_script(script),
         Effect::Text(text) => type_text(text),
+        Effect::Brightness(direction) => crate::brightness::execute(direction),
         Effect::AgentSide => {
             tracing::debug!(
                 action = action.label(),

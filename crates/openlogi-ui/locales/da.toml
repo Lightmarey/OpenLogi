@@ -396,6 +396,8 @@ momentum_use_general = "Brug generelle indstillinger"
 momentum_override_count = "Mus med egne indstillinger: %{count}"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "Tildel %{name}"
 bind_control_in_app = "Tildel %{name} i %{app}"
 unbound = "Ikke tildelt"

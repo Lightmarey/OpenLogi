@@ -127,6 +127,7 @@ pub(super) fn execute(action: &Action) {
         Effect::Script(script) => super::dispatch_script(script),
         // TypeText emits a unicode string, layout-independent.
         Effect::Text(text) => type_text(text),
+        Effect::Brightness(direction) => crate::brightness::execute(direction),
         Effect::AgentSide => {
             tracing::debug!(
                 action = action.label(),

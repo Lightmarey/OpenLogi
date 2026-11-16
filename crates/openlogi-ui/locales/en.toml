@@ -396,6 +396,8 @@ momentum_use_general = "Use General settings"
 momentum_override_count = "Mice with their own settings: %{count}"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "Bind %{name}"
 bind_control_in_app = "Bind %{name} in %{app}"
 unbound = "Unbound"

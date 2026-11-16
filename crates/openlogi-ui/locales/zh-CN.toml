@@ -396,6 +396,8 @@ momentum_use_general = "使用通用设置"
 momentum_override_count = "单独设置的鼠标：%{count} 只"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "绑定 %{name}"
 bind_control_in_app = "在 %{app} 中绑定 %{name}"
 unbound = "未绑定"

@@ -128,6 +128,19 @@ struct CrownView {
 impl CrownView {
     fn function(&self, function: &CrownFunctionPresentation, colors: CrownColors) -> gpui::Div {
         let selected = function.id == self.hud.selected;
+        let value = if selected {
+            match &function.feedback {
+                Some(openlogi_core::crown::CrownFeedback::Parameter(
+                    openlogi_core::parameter::ParameterState::Available(value),
+                )) => Some(value.text().to_owned()),
+                Some(openlogi_core::crown::CrownFeedback::Parameter(
+                    openlogi_core::parameter::ParameterState::Unavailable,
+                )) => Some(rust_i18n::t!("common.unavailable").into_owned()),
+                _ => None,
+            }
+        } else {
+            None
+        };
         div()
             .w_16()
             .flex()
@@ -141,18 +154,34 @@ impl CrownView {
                     .items_center()
                     .justify_center()
                     .rounded_full()
+                    .text_color(if selected {
+                        colors.selected_text
+                    } else {
+                        colors.text
+                    })
                     .bg(if selected {
                         colors.selected
                     } else {
                         colors.resting
                     })
-                    .child(svg().path(function.icon.asset_path()).size_6().text_color(
-                        if selected {
-                            colors.selected_text
-                        } else {
-                            colors.text
-                        },
-                    )),
+                    .children(value.clone().map(|value| {
+                        div()
+                            .w_full()
+                            .text_center()
+                            .text_xs()
+                            .truncate()
+                            .child(value)
+                    }))
+                    .children(value.is_none().then(|| {
+                        svg()
+                            .path(function.icon.asset_path())
+                            .size_6()
+                            .text_color(if selected {
+                                colors.selected_text
+                            } else {
+                                colors.text
+                            })
+                    })),
             )
             .child(
                 div()

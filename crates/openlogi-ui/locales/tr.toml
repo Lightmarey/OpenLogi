@@ -396,6 +396,8 @@ momentum_use_general = "Genel ayarları kullan"
 momentum_override_count = "Kendi ayarları olan fareler: %{count}"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "%{name} ata"
 bind_control_in_app = "%{app} içinde %{name} ata"
 unbound = "Atanmamış"

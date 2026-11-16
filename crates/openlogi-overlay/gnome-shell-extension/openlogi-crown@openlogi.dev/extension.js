@@ -31,8 +31,15 @@ function validate(payload) {
             typeof entry.svg !== 'string' || entry.svg.length > 16384)
             throw new Error('Invalid Crown function presentation');
         ids.add(entry.id);
-        if (entry.feedback !== undefined && entry.feedback?.kind !== 'system_volume')
-            throw new Error('Invalid Crown parameter feedback');
+        if (entry.feedback !== undefined) {
+            const feedback = entry.feedback;
+            if (!['system_volume', 'value', 'unavailable'].includes(feedback?.kind))
+                throw new Error('Invalid Crown parameter feedback');
+            if (feedback.kind === 'value' && (!Number.isFinite(feedback.fraction) ||
+                feedback.fraction < 0 || feedback.fraction > 1 || typeof feedback.text !== 'string' ||
+                [...feedback.text].length < 1 || [...feedback.text].length > 64))
+                throw new Error('Invalid Crown parameter value');
+        }
     }
     if (!ids.has(view.selected))
         throw new Error('Unknown selected Crown function');
@@ -91,7 +98,7 @@ export default class CrownHudExtension extends Extension {
         this._bus = 0;
     }
 
-    GetVersion() { return 1; }
+    GetVersion() { return 2; }
 
     ShowAsync([payload], invocation) {
         let view;
@@ -251,7 +258,7 @@ export default class CrownHudExtension extends Extension {
             const feedback = entry.id === this._view.selected ? this._feedback.read(entry.feedback) : null;
             item.fraction = feedback?.fraction ?? 0;
             item.fill.width = item.tile.width * item.fraction;
-            item.fill.visible = feedback !== null;
+            item.fill.visible = feedback !== null && feedback.available !== false;
             item.value.visible = feedback !== null;
             item.icon.visible = feedback === null;
             item.value.text = feedback?.text ?? '';

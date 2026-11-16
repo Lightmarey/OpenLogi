@@ -396,6 +396,8 @@ momentum_use_general = "使用一般設定"
 momentum_override_count = "單獨設定的滑鼠：%{count} 隻"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "綁定 %{name}"
 bind_control_in_app = "在 %{app} 中綁定 %{name}"
 unbound = "未綁定"

@@ -82,6 +82,8 @@ pub enum Effect<'a> {
     /// for the lifetime of the press (`openlogi_inject::press_hold_modifier`),
     /// so a one-shot dispatch has nothing to post.
     AgentSide,
+    /// Adjust the native backlight through the shared parameter backend.
+    Brightness(crate::parameter::Adjustment),
 }
 
 /// A physical mouse button an [`Effect::Click`] should press.
@@ -304,6 +306,8 @@ impl Action {
             Action::RunAppleScript(src) => Effect::Script(Script::AppleScript(src)),
             Action::RunShellCommand(cmd) => Effect::Script(Script::ShellCommand(cmd)),
             Action::Workflow(steps) => Effect::Script(Script::Workflow(steps)),
+            Action::BrightnessUp => Effect::Brightness(crate::parameter::Adjustment::Increase),
+            Action::BrightnessDown => Effect::Brightness(crate::parameter::Adjustment::Decrease),
         }
     }
 }

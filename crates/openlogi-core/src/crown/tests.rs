@@ -45,6 +45,13 @@ fn feedback_tracks_actions_rather_than_editable_names_and_icons() {
         .set_binding(CrownControl::Right, Binding::Single(Action::VolumeDown))
         .unwrap();
     assert_eq!(function.feedback(), Some(CrownFeedback::SystemVolume));
+    function
+        .set_binding(CrownControl::Left, Binding::Single(Action::BrightnessDown))
+        .unwrap();
+    function
+        .set_binding(CrownControl::Right, Binding::Single(Action::BrightnessUp))
+        .unwrap();
+    assert_eq!(function.feedback(), Some(CrownFeedback::SystemBrightness));
     let function = CrownFunction::new(
         CrownFunctionId::new("volume".into()).unwrap(),
         "Volume",

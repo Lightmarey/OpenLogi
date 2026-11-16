@@ -29,7 +29,9 @@ The volume function reads GNOME's shared output mixer. Its value and fill track
 volume, mute and the current output device. Unknown readings display the function
 icon. Above-normal volume retains its actual percentage while the fill saturates.
 Custom function names and icons retain feedback when their rotation actions still
-control system volume.
+control system volume. Brightness actions use the agent's shared system-backlight
+reader. Available parameters show their authoritative text and bounded fill. A
+failed reading displays an unavailable state and clears the previous fill.
 
 ## Connection and recovery
 
@@ -40,7 +42,7 @@ during reconnection stays hidden. Failed connections and incompatible versions
 retry once per second. A healthy connection waits for updates and owner changes.
 
 Check the installed bridge version with the following command. This build uses
-bridge version 1.
+bridge version 2.
 
 ```sh
 gdbus call --session --dest org.openlogi.CrownHud \

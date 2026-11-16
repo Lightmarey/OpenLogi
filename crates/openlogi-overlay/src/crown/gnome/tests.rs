@@ -26,6 +26,23 @@ fn presentation_contains_embedded_glyphs_and_native_feedback_without_actions() {
 }
 
 #[test]
+fn measured_parameters_encode_their_actual_text_range_and_availability() {
+    use openlogi_core::crown::CrownFeedback;
+    use openlogi_core::parameter::{ParameterState, ParameterValue};
+    let profile = openlogi_core::crown::CrownProfile::default();
+    let mut hud = CrownHud::new(&profile, profile.functions()[0].id().clone());
+    hud.functions[0].feedback = Some(CrownFeedback::Parameter(ParameterState::Available(
+        ParameterValue::new(250, 0, 1000, "25%".into()).unwrap(),
+    )));
+    let encoded: serde_json::Value = serde_json::from_str(&encode(&hud).unwrap()).unwrap();
+    assert_eq!(encoded["functions"][0]["feedback"]["fraction"], 0.25);
+    assert_eq!(encoded["functions"][0]["feedback"]["text"], "25%");
+    hud.functions[0].feedback = Some(CrownFeedback::Parameter(ParameterState::Unavailable));
+    let encoded: serde_json::Value = serde_json::from_str(&encode(&hud).unwrap()).unwrap();
+    assert_eq!(encoded["functions"][0]["feedback"]["kind"], "unavailable");
+}
+
+#[test]
 #[ignore = "requires the native GNOME Crown HUD test runner"]
 fn crown_hud_native_shell() {
     use std::io::Read as _;
@@ -52,6 +69,21 @@ fn crown_hud_native_shell() {
         &profile,
         profile.functions()[2].id().clone(),
     )));
+    advance();
+    let mut parameter = CrownHud::new(&profile, profile.functions()[0].id().clone());
+    parameter.functions[0].name = "Brightness".into();
+    parameter.functions[0].feedback = Some(openlogi_core::crown::CrownFeedback::Parameter(
+        openlogi_core::parameter::ParameterState::Available(
+            openlogi_core::parameter::ParameterValue::new(250, 0, 1000, "25%".into())
+                .expect("measured range"),
+        ),
+    ));
+    presenter.show(Some(parameter.clone()));
+    advance();
+    parameter.functions[0].feedback = Some(openlogi_core::crown::CrownFeedback::Parameter(
+        openlogi_core::parameter::ParameterState::Unavailable,
+    ));
+    presenter.show(Some(parameter));
     advance();
     drop(presenter);
 }
@@ -92,7 +124,7 @@ async fn bridge_recovers_late_enable_restart_disable_and_version_mismatch() {
         Ok("1")
     );
     let shell = Shell {
-        version: Arc::new(AtomicU32::new(1)),
+        version: Arc::new(AtomicU32::new(BRIDGE_VERSION)),
         shown: Arc::default(),
     };
     let (state, updates) = watch::channel(None);
@@ -154,7 +186,7 @@ async fn bridge_recovers_late_enable_restart_disable_and_version_mismatch() {
         shell.shown.lock().unwrap().is_empty(),
         "version mismatch never presents a stale HUD"
     );
-    shell.version.store(1, Ordering::SeqCst);
+    shell.version.store(BRIDGE_VERSION, Ordering::SeqCst);
     until(|| !shell.shown.lock().unwrap().is_empty()).await;
     assert!(
         shell.shown.lock().unwrap().iter().all(Option::is_none),

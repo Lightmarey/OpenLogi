@@ -396,6 +396,8 @@ momentum_use_general = "Allgemeine Einstellungen verwenden"
 momentum_override_count = "Mäuse mit eigenen Einstellungen: %{count}"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "%{name} zuweisen"
 bind_control_in_app = "%{name} in %{app} zuweisen"
 unbound = "Nicht zugewiesen"

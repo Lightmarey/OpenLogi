@@ -396,6 +396,8 @@ momentum_use_general = "Käytä yleisiä asetuksia"
 momentum_override_count = "Hiiret, joilla on omat asetukset: %{count}"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "Määritä %{name}"
 bind_control_in_app = "Määritä %{name} sovelluksessa %{app}"
 unbound = "Ei määritetty"

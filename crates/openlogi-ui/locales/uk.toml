@@ -396,6 +396,8 @@ momentum_use_general = "Використовувати загальні нала
 momentum_override_count = "Миші з власними налаштуваннями: %{count}"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "Прив'язати %{name}"
 bind_control_in_app = "Прив'язати %{name} в %{app}"
 unbound = "Не прив'язано"

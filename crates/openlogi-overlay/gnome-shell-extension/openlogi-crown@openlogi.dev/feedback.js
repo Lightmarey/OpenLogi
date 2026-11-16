@@ -1,5 +1,6 @@
 // Read-only native feedback. Shell owns the shared mixer and volume controls;
 // Crown bindings remain executable only in the agent.
+import {gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {getMixerControl} from 'resource:///org/gnome/shell/ui/status/volume.js';
 
 export class FeedbackProvider {
@@ -28,7 +29,11 @@ export class FeedbackProvider {
     }
 
     read(source) {
-        if (source?.kind !== 'system_volume' || !this._stream)
+        if (source?.kind === 'value')
+            return source;
+        if (source?.kind === 'unavailable' || source?.kind === 'system_volume' && !this._stream)
+            return {fraction: 0, text: _('Unavailable'), available: false};
+        if (source?.kind !== 'system_volume')
             return null;
         const normal = this._control.get_vol_max_norm();
         if (normal <= 0)

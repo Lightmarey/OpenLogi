@@ -29,3 +29,6 @@ msgstr "底部边距"
 
 msgid "Logical pixels above the application monitor’s work-area edge"
 msgstr "距当前应用所在屏幕工作区底部的逻辑像素数"
+
+msgid "Unavailable"
+msgstr "不可用"

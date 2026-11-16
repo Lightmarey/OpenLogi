@@ -196,7 +196,8 @@ fn needs_focus(action: &Action) -> bool {
         | Effect::Click(_)
         | Effect::Scroll { .. }
         | Effect::Media(_)
-        | Effect::Native(_) => false,
+        | Effect::Native(_)
+        | Effect::Brightness(_) => false,
     }
 }
 

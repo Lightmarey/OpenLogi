@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::app::profile_key_for;
 use crate::binding::{Action, ActionRingIcon, Binding, ButtonId};
+use crate::parameter::ParameterState;
 use crate::rotary::{RotarySettings, TactileMode};
 
 /// A read-only feedback source understood by a native Crown presenter.
@@ -14,6 +15,10 @@ use crate::rotary::{RotarySettings, TactileMode};
 pub enum CrownFeedback {
     /// Current system output volume, read by the native presenter.
     SystemVolume,
+    /// Built-in display backlight, measured by the agent.
+    SystemBrightness,
+    /// Agent- or application-published, validated parameter feedback.
+    Parameter(ParameterState),
 }
 
 /// Maximum number of functions offered in one Crown profile.
@@ -315,20 +320,28 @@ impl CrownFunction {
     /// to represent a system parameter their actions no longer change.
     #[must_use]
     pub fn feedback(&self) -> Option<CrownFeedback> {
-        matches!(
-            (
-                self.bindings.get(&CrownControl::Left),
-                self.bindings.get(&CrownControl::Right)
-            ),
+        match (
+            self.bindings.get(&CrownControl::Left),
+            self.bindings.get(&CrownControl::Right),
+        ) {
             (
                 Some(Binding::Single(Action::VolumeDown)),
-                Some(Binding::Single(Action::VolumeUp))
-            ) | (
                 Some(Binding::Single(Action::VolumeUp)),
-                Some(Binding::Single(Action::VolumeDown))
             )
-        )
-        .then_some(CrownFeedback::SystemVolume)
+            | (
+                Some(Binding::Single(Action::VolumeUp)),
+                Some(Binding::Single(Action::VolumeDown)),
+            ) => Some(CrownFeedback::SystemVolume),
+            (
+                Some(Binding::Single(Action::BrightnessDown)),
+                Some(Binding::Single(Action::BrightnessUp)),
+            )
+            | (
+                Some(Binding::Single(Action::BrightnessUp)),
+                Some(Binding::Single(Action::BrightnessDown)),
+            ) => Some(CrownFeedback::SystemBrightness),
+            _ => None,
+        }
     }
 
     /// Set a binding after validating its physical lifecycle.

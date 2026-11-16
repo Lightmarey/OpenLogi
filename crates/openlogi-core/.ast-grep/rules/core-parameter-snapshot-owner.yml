@@ -1,0 +1,31 @@
+id: core-parameter-snapshot-owner
+language: rust
+severity: error
+message: Reuse openlogi_core::parameter::ParameterValue for validated parameter snapshots.
+files:
+  - crates/**/*.rs
+ignores:
+  - crates/openlogi-core/src/parameter.rs
+rule:
+  all:
+    - kind: struct_item
+    - has:
+        pattern:
+          context: "struct Snapshot { value: $TYPE }"
+          selector: field_declaration
+        stopBy: end
+    - has:
+        pattern:
+          context: "struct Snapshot { minimum: $TYPE }"
+          selector: field_declaration
+        stopBy: end
+    - has:
+        pattern:
+          context: "struct Snapshot { maximum: $TYPE }"
+          selector: field_declaration
+        stopBy: end
+    - has:
+        pattern:
+          context: "struct Snapshot { text: $TEXT }"
+          selector: field_declaration
+        stopBy: end

@@ -396,6 +396,8 @@ momentum_use_general = "Выкарыстоўваць агульныя налад
 momentum_override_count = "Мышы з уласнымі наладамі: %{count}"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "Прывязаць %{name}"
 bind_control_in_app = "Прывязаць %{name} у %{app}"
 unbound = "Не прывязана"

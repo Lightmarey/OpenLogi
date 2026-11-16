@@ -692,6 +692,17 @@ Top = { action = { CustomShortcut = "Cmd+Shift+P" }, icon = "Keyboard", label = 
 
 ## Craft Crown
 
+`BrightnessUp` and `BrightnessDown` are shared actions available to keyboard,
+mouse and Crown bindings. A Crown function with these two rotation actions
+shows the measured backlight value. Visible feedback refreshes every 250 ms
+and becomes unavailable after a failed read.
+
+Linux reads the standard `/sys/class/backlight` ABI and asks the current logind
+session to write brightness. macOS uses public IOKit backlight parameters when
+the display exposes them. Windows uses `ROOT\WMI` monitor brightness providers.
+Displays without those native backlight interfaces report unavailable. External
+display DDC/CI control is a future platform adapter.
+
 On a Craft keyboard, open **Keys** and select **Crown** on the keyboard image or
 in the key list. Direct mode exposes touch, press,
 left/right rotation and left/right rotation while pressed. Touch and press retain

@@ -1570,3 +1570,10 @@ fn crown_input_names_are_wire_stable() {
         "1143726f776e507265737365645269676874",
     );
 }
+
+/// Shared brightness actions extend the existing action vocabulary.
+#[test]
+fn brightness_action_indices() {
+    assert_wire(&openlogi_core::binding::Action::BrightnessUp, "41");
+    assert_wire(&openlogi_core::binding::Action::BrightnessDown, "42");
+}

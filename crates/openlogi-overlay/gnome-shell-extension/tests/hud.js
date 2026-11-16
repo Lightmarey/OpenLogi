@@ -81,8 +81,11 @@ async function checkParameter(extension, text, fraction) {
     check(Math.abs(fill.width - tile.width * fraction) < 1, `Fill allocation must match ${fraction}: ${fill.width}/${tile.width}`);
     const [fillX, fillY] = fill.get_transformed_position();
     const [tileX, tileY] = tile.get_transformed_position();
-    check(Math.abs(fillX - tileX) < 1 && Math.abs(fillY - tileY) < 1 && fill.height === tile.height,
-        'Progress must split the whole tile vertically without displacing its content');
+    const classic = extension._settings.get_string('hud-theme') === 'logitech';
+    const expectedHeight = classic ? tile.height : 3 * St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    const expectedY = classic ? tileY : tileY + tile.height - expectedHeight;
+    check(Math.abs(fillX - tileX) < 1 && Math.abs(fillY - expectedY) < 1 && fill.height === expectedHeight,
+        'Progress must retain the selected skin\'s full-tile or bottom-edge geometry');
 }
 
 export const METRICS = {};
@@ -277,7 +280,7 @@ export async function run() {
     check(extension._actor === actor && extension._owner === owner,
         'Invalid presentation must leave the valid presenter and HUD intact');
     for (const feedback of [{kind: 'unknown'}, {kind: 'value', fraction: 1.01, text: 'bad'},
-        {kind: 'value', fraction: 0.5, text: 'x'.repeat(33)}]) {
+        {kind: 'value', fraction: 0.5, text: 'x'.repeat(65)}]) {
         const presentation = JSON.parse(JSON.stringify(extension._view));
         presentation.functions[0].feedback = feedback;
         const invalidFeedback = Gio.Subprocess.new(['gdbus', 'call', '--session', '--dest', 'org.openlogi.CrownHud',
@@ -332,6 +335,24 @@ export async function run() {
     advance();
     await until(() => selectedName(extension) === 'Tabs', 'A subsequent presentation must appear');
     advance();
+    await until(() => selectedName(extension) === 'Brightness', 'Agent parameter snapshots must arrive through the presenter');
+    for (const skin of ['logitech', 'openlogi', 'gnome']) {
+        extension._settings.set_string('hud-theme', skin);
+        for (const scheme of ['light', 'dark']) {
+            await systemScheme(systemSettings, scheme);
+            await checkParameter(extension, '25%', 0.25);
+            checkAppearance(skin, scheme);
+            check(global.display.focus_window === focused && global.stage.get_key_focus() === keyboardFocus,
+                'Parameter updates must retain application and keyboard focus');
+        }
+    }
+    await saveScreenshot(GLib.getenv('OPENLOGI_CROWN_TEST_BRIGHTNESS_SCREENSHOT'));
+    advance();
+    await until(() => extension._items.get('volume')?.value.text === 'Unavailable',
+        'Failed parameter reads must visibly become unavailable');
+    check(!extension._items.get('volume').fill.visible,
+        'Unavailable parameters must clear their measured fill');
+    advance();
     await subprocess.wait_check_async(null);
     await until(() => extension._actor === null, 'Hide must remove the Shell actor');
     check(global.display.focus_window === focused, 'Dismissal must retain application focus');
@@ -340,6 +361,6 @@ export async function run() {
     Main.layoutManager.addChrome = addChrome;
     check(appearanceFailures.length === 0, `Skins must follow live system light/dark changes: ${appearanceFailures.join('; ')}`);
     check(layoutFailures.length === 0, `Crown layout regressions: ${layoutFailures.join('; ')}`);
-    print('CROWN SHELL PASS: compact heading-free layout, centered content, authoritative volume and vertical fill, native output volume/mute/device changes, system light/dark switching, first visible position, actor reuse, three skins, selection, hide, owner lease, invalid-presentation rejection, application/keyboard focus');
+    print('CROWN SHELL PASS: compact heading-free layout, centered content, authoritative volume and parameter snapshots, unavailable feedback, vertical fill, native output volume/mute/device changes, system light/dark switching, first visible position, actor reuse, three skins, selection, hide, owner lease, invalid-presentation rejection, application/keyboard focus');
     await Scripting.destroyTestWindows();
 }

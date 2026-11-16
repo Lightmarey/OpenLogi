@@ -12,7 +12,7 @@ use zbus::{Connection, Proxy, connection::Builder};
 
 const SERVICE: &str = "org.openlogi.CrownHud";
 const PATH: &str = "/org/openlogi/CrownHud";
-const BRIDGE_VERSION: u32 = 1;
+const BRIDGE_VERSION: u32 = 2;
 const RETRY_PERIOD: Duration = Duration::from_secs(1);
 
 pub(super) struct Presenter {
@@ -147,6 +147,8 @@ struct Function<'a> {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Feedback {
     SystemVolume,
+    Value { fraction: f64, text: String },
+    Unavailable,
 }
 
 #[derive(Serialize)]
@@ -184,6 +186,16 @@ fn encode(hud: &CrownHud) -> anyhow::Result<String> {
                 svg: std::str::from_utf8(&bytes)?.to_owned(),
                 feedback: function.feedback.as_ref().map(|feedback| match feedback {
                     openlogi_core::crown::CrownFeedback::SystemVolume => Feedback::SystemVolume,
+                    openlogi_core::crown::CrownFeedback::Parameter(
+                        openlogi_core::parameter::ParameterState::Available(value),
+                    ) => Feedback::Value {
+                        fraction: value.fraction(),
+                        text: value.text().to_owned(),
+                    },
+                    openlogi_core::crown::CrownFeedback::SystemBrightness
+                    | openlogi_core::crown::CrownFeedback::Parameter(
+                        openlogi_core::parameter::ParameterState::Unavailable,
+                    ) => Feedback::Unavailable,
                 }),
             })
         })

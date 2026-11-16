@@ -264,6 +264,10 @@ pub enum Action {
     EasySwitchChannel2,
     /// Move the device to its third Easy-Switch channel.
     EasySwitchChannel3,
+    /// Increase the built-in display backlight through the native system service.
+    BrightnessUp,
+    /// Decrease the built-in display backlight through the native system service.
+    BrightnessDown,
 }
 
 /// Which of a held chord's keys stay down for the lifetime of the press.
@@ -375,6 +379,8 @@ macro_rules! for_each_unit_action {
             VolumeUp "Volume Up" "actions.volume_up" Media Volume,
             VolumeDown "Volume Down" "actions.volume_down" Media VolumeDown,
             MuteVolume "Mute" "actions.mute" Media Mute,
+            BrightnessUp "Brightness Up" "actions.brightness_up" System Monitor,
+            BrightnessDown "Brightness Down" "actions.brightness_down" System Monitor,
             // DPI
             CycleDpiPresets "Cycle DPI Presets" "pointer.cycle_dpi_presets" Dpi Gauge,
             NextDpiPreset "Next DPI Preset" "pointer.next_dpi_preset" Dpi ArrowUp,

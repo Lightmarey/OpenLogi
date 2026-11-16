@@ -396,6 +396,8 @@ momentum_use_general = "Použít obecná nastavení"
 momentum_override_count = "Myši s vlastním nastavením: %{count}"
 
 [actions]
+brightness_up = "Brightness Up"
+brightness_down = "Brightness Down"
 bind_control = "Přiřadit %{name}"
 bind_control_in_app = "Přiřadit %{name} v aplikaci %{app}"
 unbound = "Nepřiřazeno"
