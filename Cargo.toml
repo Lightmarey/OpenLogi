@@ -15,6 +15,7 @@ members = [
     "crates/openlogi-assets",
     "crates/openlogi-cli",
     "crates/openlogi-ipc",
+    "crates/openlogi-sdk",
     "crates/openlogi-flow",
     "crates/openlogi-agent-core",
     "crates/openlogi-agent",

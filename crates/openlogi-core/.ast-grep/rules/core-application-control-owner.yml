@@ -1,0 +1,12 @@
+id: core-application-control-owner
+language: rust
+severity: error
+message: Use openlogi_core::application_control identifier and label validation for application controls.
+files:
+  - crates/openlogi-sdk/**/*.rs
+  - crates/openlogi-agent-core/src/applications/**/*.rs
+  - crates/openlogi-core/src/crown.rs
+rule:
+  any:
+    - pattern: $BYTE.is_ascii_alphanumeric()
+    - pattern: $NAME.chars().count() > 64

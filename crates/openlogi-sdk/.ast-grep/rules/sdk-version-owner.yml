@@ -1,0 +1,12 @@
+id: sdk-version-owner
+language: rust
+severity: error
+message: Use openlogi_sdk::require_version or its Client handshake for application protocol negotiation.
+files:
+  - crates/openlogi-sdk/**/*.rs
+  - crates/openlogi-agent-core/src/applications/**/*.rs
+ignores:
+  - crates/openlogi-sdk/src/protocol.rs
+rule:
+  kind: binary_expression
+  regex: '\b(?:openlogi_sdk::)?VERSION\s*(?:==|!=)|(?:==|!=)\s*(?:openlogi_sdk::)?VERSION\b'

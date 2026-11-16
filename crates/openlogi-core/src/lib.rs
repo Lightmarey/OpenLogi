@@ -16,6 +16,7 @@
 
 pub mod action_ring;
 pub mod app;
+pub mod application_control;
 pub mod binding;
 pub mod bindings;
 pub mod brand;

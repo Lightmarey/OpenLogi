@@ -22,7 +22,7 @@ pub enum CrownFeedback {
 }
 
 /// Maximum number of functions offered in one Crown profile.
-pub const MAX_FUNCTIONS: usize = 8;
+pub const MAX_FUNCTIONS: usize = crate::application_control::MAX_FUNCTIONS;
 
 /// Physical input reserved for selecting the next function.
 ///
@@ -107,16 +107,7 @@ impl From<CrownFunctionId> for String {
 }
 
 fn validate_id(id: &str) -> Result<(), CrownError> {
-    if !id.is_empty()
-        && id.len() <= 64
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-    {
-        Ok(())
-    } else {
-        Err(CrownError::InvalidId)
-    }
+    crate::application_control::validate_identifier(id).map_err(|_| CrownError::InvalidId)
 }
 
 /// Controls whose meaning changes with the selected Crown function.
@@ -271,11 +262,9 @@ impl CrownFunction {
 
     /// Rename without changing the remembered identity.
     pub fn rename(&mut self, name: &str) -> Result<(), CrownError> {
-        let name = name.trim();
-        if name.is_empty() || name.chars().count() > 64 {
-            return Err(CrownError::InvalidName);
-        }
-        name.clone_into(&mut self.name);
+        self.name = crate::application_control::ControlLabel::new(name)
+            .map_err(|_| CrownError::InvalidName)?
+            .into();
         Ok(())
     }
 

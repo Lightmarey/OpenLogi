@@ -77,6 +77,12 @@ version_group = "openlogi"
 name = "openlogi-ipc"
 version_group = "openlogi"
 
+# Public application client follows workspace releases. Its wire protocol is
+# independently versioned by openlogi-sdk.
+[[package]]
+name = "openlogi-sdk"
+version_group = "openlogi"
+
 # OS input-event synthesis split out of openlogi-core (depends on it). Published
 # with the workspace under unified versioning.
 [[package]]

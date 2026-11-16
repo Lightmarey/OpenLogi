@@ -1,0 +1,34 @@
+[package]
+name = "openlogi-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Versioned local application controls protocol and Rust client for OpenLogi."
+
+[features]
+default = ["client"]
+client = ["dep:interprocess", "dep:tokio", "dep:tokio-util", "dep:futures-util", "dep:sha2", "openlogi-core/fs"]
+
+[dependencies]
+futures-util = { version = "0.3", features = ["sink"], optional = true }
+interprocess = { workspace = true, optional = true }
+openlogi-core = { path = "../openlogi-core", version = "0.9.0", default-features = false }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = { workspace = true, optional = true }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util"], optional = true }
+tokio-util = { version = "0.7", features = ["codec"], optional = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[[example]]
+name = "parameters"
+required-features = ["client"]
