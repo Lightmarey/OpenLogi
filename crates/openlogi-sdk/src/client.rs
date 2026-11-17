@@ -44,10 +44,11 @@ impl Client {
 
     /// Register on an explicitly isolated endpoint.
     pub async fn connect_at(endpoint: &Endpoint, provider: Provider) -> Result<Self, ClientError> {
-        let mut stream = endpoint.connect().await?;
-        let response = tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
+        let (stream, response) = tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
+            let mut stream = endpoint.connect().await?;
             transport::send(&mut stream, &ClientMessage::register(provider)).await?;
-            transport::receive::<ServerMessage>(&mut stream).await
+            let response = transport::receive::<ServerMessage>(&mut stream).await?;
+            Ok::<_, TransportError>((stream, response))
         })
         .await
         .map_err(|_| ClientError::Timeout)??;
@@ -119,5 +120,40 @@ impl Client {
             self.stream.take();
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ControlLabel, ProviderId};
+
+    #[tokio::test]
+    async fn an_unresponsive_host_releases_registration_at_its_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let endpoint = Endpoint::at(directory.path().join("unresponsive.sock"));
+        let listener = endpoint.bind().unwrap();
+        let (finish, until_finished) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let _stream = tokio::time::timeout(HANDSHAKE_TIMEOUT, listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            until_finished.await.unwrap();
+        });
+        let result = tokio::time::timeout(
+            HANDSHAKE_TIMEOUT + std::time::Duration::from_secs(1),
+            Client::connect_at(
+                &endpoint,
+                Provider {
+                    id: ProviderId::new("unresponsive".into()).unwrap(),
+                    name: ControlLabel::new("Unresponsive host").unwrap(),
+                },
+            ),
+        )
+        .await;
+        finish.send(()).unwrap();
+        server.await.unwrap();
+        assert!(matches!(result.unwrap(), Err(ClientError::Timeout)));
     }
 }

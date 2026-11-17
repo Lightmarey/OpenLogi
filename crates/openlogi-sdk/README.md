@@ -35,7 +35,8 @@ endpoint for GUI development. It supplies scripted device inventory.
 ## Protocol version 1
 
 Each UTF-8 line contains one JSON message, bounded to 65,536 bytes excluding its
-newline. Registration and writes have bounded deadlines. The Rust client owns
+newline. Connection and registration share a five-second deadline. Writes have
+a two-second deadline. The Rust client owns
 the handshake and closes a failed send's connection before it can be reused.
 
 | Direction | Message | Required contents |
@@ -95,6 +96,8 @@ publish fresh parameter readings when activated and whenever their native values
 Unix uses a user-only socket beside the profile's configuration file. Windows
 uses a user/profile-derived named pipe and the creating user's default access
 control. The SDK protocol version is independent of the internal GUI IPC.
+The Windows backend also bounds its native pipe wait, so an unavailable server
+releases the underlying connection worker when the registration attempt ends.
 
 ```sh
 cargo test -p openlogi-sdk --all-targets

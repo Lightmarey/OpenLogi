@@ -4,12 +4,18 @@ use futures_util::{SinkExt as _, StreamExt as _};
 use std::{io, path::PathBuf};
 
 use interprocess::local_socket::tokio::{Listener as LocalListener, Stream, prelude::*};
-use interprocess::local_socket::{ListenerOptions, Name};
 use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use crate::{MAX_FRAME_BYTES, ProtocolError};
+
+#[cfg(unix)]
+#[path = "transport/unix.rs"]
+mod platform;
+#[cfg(windows)]
+#[path = "transport/windows.rs"]
+mod platform;
 
 /// Bound registration on both sides of a native application connection.
 pub const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -54,44 +60,15 @@ impl Endpoint {
         Self(path)
     }
 
-    fn name(&self) -> io::Result<Name<'static>> {
-        #[cfg(unix)]
-        {
-            use interprocess::local_socket::{GenericFilePath, ToFsName};
-            self.0.clone().to_fs_name::<GenericFilePath>()
-        }
-        #[cfg(windows)]
-        {
-            use interprocess::local_socket::{GenericNamespaced, ToNsName};
-            use sha2::{Digest as _, Sha256};
-            // The user-specific profile directory gives each account and each
-            // development/production profile a distinct named-pipe namespace.
-            let hash = Sha256::digest(self.0.to_string_lossy().as_bytes());
-            format!("openlogi-sdk-{hash:x}").to_ns_name::<GenericNamespaced>()
-        }
-    }
-
     /// Bind the host endpoint. The agent must already own its single-instance lock.
     /// A stale Unix socket is reclaimed, and the socket itself is user-only.
     pub fn bind(&self) -> Result<Listener, TransportError> {
-        #[cfg(unix)]
-        if let Some(parent) = self.0.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let options = ListenerOptions::new()
-            .name(self.name()?)
-            .try_overwrite(true);
-        #[cfg(unix)]
-        let options = {
-            use interprocess::os::unix::local_socket::ListenerOptionsExt as _;
-            options.mode(0o600)
-        };
-        Ok(Listener(options.create_tokio()?))
+        Ok(Listener(platform::bind(&self.0)?))
     }
 
     /// Connect to a host using the same namespace and framing as its listener.
     pub async fn connect(&self) -> Result<JsonLines, TransportError> {
-        Ok(frame(Stream::connect(self.name()?).await?))
+        Ok(frame(platform::connect(&self.0).await?))
     }
 }
 

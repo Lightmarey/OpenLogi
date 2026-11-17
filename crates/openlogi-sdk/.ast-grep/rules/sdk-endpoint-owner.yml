@@ -1,0 +1,11 @@
+id: sdk-endpoint-owner
+language: rust
+severity: error
+message: The Windows transport owns pipe_name and the application endpoint namespace.
+files:
+  - crates/**/*.rs
+ignores:
+  - crates/openlogi-sdk/src/transport/windows.rs
+rule:
+  kind: string_literal
+  regex: 'openlogi-sdk-'

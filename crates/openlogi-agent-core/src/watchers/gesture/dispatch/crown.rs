@@ -93,11 +93,29 @@ impl CrownFunctions {
     pub(super) fn retire(&mut self, parent: &HidppSessionId) {
         self.capabilities.remove(&parent.epoch());
     }
-    pub(super) fn application(
+    pub(super) fn dispatch_application_motion(
         &self,
         parent: &HidppSessionId,
-    ) -> Option<crate::applications::ActiveSession> {
-        self.sessions.get(parent)?.application
+        policy: Option<&CrownDispatch>,
+        motion: openlogi_hid::crown::CrownMotion,
+        amount: f64,
+        ratcheted: bool,
+        outputs: &GestureOutputs,
+    ) -> bool {
+        if policy.is_none_or(|policy| policy.application.is_none()) {
+            return false;
+        }
+        if let Some(application) = self
+            .sessions
+            .get(parent)
+            .and_then(|session| session.application)
+        {
+            outputs.applications.input(
+                application,
+                crate::applications::crown_motion_for(motion, amount, ratcheted),
+            );
+        }
+        true
     }
     pub(super) fn cancel(&mut self, parent: &HidppSessionId, outputs: &GestureOutputs) {
         if let Some(session) = self.sessions.remove(parent) {

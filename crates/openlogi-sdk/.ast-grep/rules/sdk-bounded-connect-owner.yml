@@ -1,0 +1,15 @@
+id: sdk-bounded-connect-owner
+language: rust
+severity: error
+message: Use the SDK transport's bounded Windows connection and Client registration deadline.
+files:
+  - crates/openlogi-sdk/**/*.rs
+ignores:
+  - crates/openlogi-sdk/src/transport/unix.rs
+rule:
+  kind: call_expression
+  has:
+    field: function
+    any:
+      - regex: '(?:^|::)connect_by_path$'
+      - regex: '^Stream::connect$'

@@ -470,22 +470,18 @@ impl InputDispatcher {
             f64::from(motion.slots) * motion.resolution.native_per_increment()
         };
         let distance = native * settings.sensitivity.multiplier();
-        if plan
-            .crown
-            .as_ref()
-            .is_some_and(|policy| policy.application.is_some())
-        {
-            if let Some(application) = self.crown.application(parent) {
-                let amount = if settings.inverted {
-                    -distance
-                } else {
-                    distance
-                };
-                self.outputs.applications.input(
-                    application,
-                    crate::applications::crown_motion_for(motion, amount, ratcheted),
-                );
-            }
+        if self.crown.dispatch_application_motion(
+            parent,
+            plan.crown.as_ref(),
+            motion,
+            if settings.inverted {
+                -distance
+            } else {
+                distance
+            },
+            ratcheted,
+            &self.outputs,
+        ) {
             return;
         }
         let steps = if ratcheted {
