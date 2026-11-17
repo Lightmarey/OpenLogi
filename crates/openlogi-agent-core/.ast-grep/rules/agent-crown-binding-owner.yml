@@ -1,0 +1,15 @@
+id: agent-crown-binding-owner
+language: rust
+severity: error
+message: Use press_binding to resolve Crown direct rotation through the current G-Shift layer.
+files:
+  - crates/openlogi-agent-core/src/watchers/gesture/dispatch.rs
+rule:
+  all:
+    - pattern: $PLAN.bindings.get($BUTTON)
+    - inside:
+        kind: function_item
+        has:
+          field: name
+          regex: '^dispatch_crown_motion$'
+        stopBy: end

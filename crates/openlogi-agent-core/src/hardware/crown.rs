@@ -8,9 +8,15 @@ use super::DeviceOp;
 use crate::receiver_access::SessionReceiverLease;
 use std::sync::Arc;
 
+#[derive(Clone, Copy, Default)]
+struct ModeRequest {
+    mode: TactileMode,
+    revision: u64,
+}
+
 #[derive(Clone)]
 pub(crate) struct CrownModeHandle {
-    requested: watch::Sender<TactileMode>,
+    requested: watch::Sender<ModeRequest>,
     #[cfg(test)]
     applied: watch::Receiver<Option<TactileMode>>,
 }
@@ -18,12 +24,23 @@ pub(crate) struct CrownModeHandle {
 impl CrownModeHandle {
     pub(crate) fn request(&self, mode: TactileMode) {
         self.requested.send_if_modified(|requested| {
-            if *requested == mode {
+            if requested.mode == mode {
                 return false;
             }
-            *requested = mode;
+            requested.mode = mode;
+            requested.revision = requested.revision.wrapping_add(1);
             true
         });
+    }
+
+    pub(crate) fn reconfirm(&self) {
+        self.requested.send_modify(|requested| {
+            requested.revision = requested.revision.wrapping_add(1);
+        });
+    }
+
+    pub(crate) fn accepts(&self, request: u64) -> bool {
+        self.requested.borrow().revision == request
     }
 }
 
@@ -38,7 +55,7 @@ impl CrownModeTask {
         lease: Arc<SessionReceiverLease>,
         inputs: tokio::sync::mpsc::UnboundedSender<openlogi_hid::CapturedInput>,
     ) -> (CrownModeHandle, Self) {
-        let (requested, request) = watch::channel(TactileMode::Inherit);
+        let (requested, request) = watch::channel(ModeRequest::default());
         #[cfg(test)]
         let (applied, observed) = watch::channel(None);
         let (stop, stopping) = oneshot::channel();
@@ -83,7 +100,7 @@ fn tactile(mode: RatchetMode) -> Option<TactileMode> {
 
 async fn run(
     op: DeviceOp,
-    mut requested: watch::Receiver<TactileMode>,
+    mut requested: watch::Receiver<ModeRequest>,
     #[cfg(test)] applied: watch::Sender<Option<TactileMode>>,
     mut stop: oneshot::Receiver<()>,
     lease: Arc<SessionReceiverLease>,
@@ -100,12 +117,12 @@ async fn run(
                 if changed.is_err() { break; }
             }
         }
-        let desired = *requested.borrow_and_update();
+        let request = *requested.borrow_and_update();
+        let desired = request.mode;
         retry = false;
-        if desired == TactileMode::Inherit && original.is_none() {
-            continue;
-        }
-        if original.is_none() {
+        let baseline = if let Some((_, mode)) = &original {
+            *mode
+        } else {
             match op
                 .clone()
                 .run_in_session(HidppOperation::ReadCrown, &lease, |shared| async move {
@@ -114,8 +131,12 @@ async fn run(
                 })
                 .await
             {
-                Ok(mode) => {
-                    original = Some(mode);
+                Ok(snapshot) => {
+                    let mode = snapshot.1;
+                    if desired != TactileMode::Inherit {
+                        original = Some(snapshot);
+                    }
+                    mode
                 }
                 Err(error) => {
                     tracing::warn!(%error, "could not acquire Crown tactile lease");
@@ -123,16 +144,24 @@ async fn run(
                     continue;
                 }
             }
-        }
+        };
         let mode = match desired {
-            TactileMode::Inherit => original.as_ref()?.1,
+            TactileMode::Inherit => baseline,
             TactileMode::Smooth => RatchetMode::Free,
             TactileMode::Ratchet => RatchetMode::Ratchet,
         };
-        match write(&op, &lease, mode).await {
+        let confirmation = if original.is_some() {
+            write(&op, &lease, mode).await
+        } else {
+            Ok(mode)
+        };
+        match confirmation {
             Ok(mode) => {
                 if let Some(mode) = tactile(mode) {
-                    let _ = inputs.send(openlogi_hid::CapturedInput::CrownModeApplied(mode));
+                    let _ = inputs.send(openlogi_hid::CapturedInput::CrownModeApplied {
+                        mode,
+                        request: request.revision,
+                    });
                     #[cfg(test)]
                     applied.send_replace(Some(mode));
                 }
@@ -167,7 +196,7 @@ async fn write(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -183,14 +212,14 @@ mod tests {
         info_reads: usize,
     }
 
-    struct Fixture {
+    pub(crate) struct Fixture {
         access: DeviceAccess,
         route: openlogi_hid::DeviceRoute,
         state: Arc<Mutex<DeviceState>>,
     }
 
     impl Fixture {
-        async fn new() -> Self {
+        pub(crate) async fn new() -> Self {
             let registry = openlogi_hid::ChannelRegistry::default();
             let route = openlogi_hid::DeviceRoute::Direct {
                 vendor_id: 0x046d,
@@ -200,7 +229,7 @@ mod tests {
                 mode: 2,
                 writes: Vec::new(),
                 reject_restore: false,
-                controls: 4,
+                controls: 7,
                 info_reads: 0,
             }));
             let hardware = Arc::clone(&state);
@@ -256,7 +285,7 @@ mod tests {
             }
         }
 
-        fn start(
+        pub(crate) fn start(
             &self,
         ) -> (
             CrownModeHandle,
@@ -274,6 +303,10 @@ mod tests {
             let (handle, task) =
                 CrownModeTask::spawn(self.access.op(&self.route), Arc::clone(&lease), sink);
             (handle, task, lease, inputs)
+        }
+
+        pub(crate) fn power_cycle(&self) {
+            self.state.lock().unwrap().mode = 2;
         }
     }
 
@@ -293,15 +326,18 @@ mod tests {
     async fn crown_modes_are_confirmed_and_the_original_mode_is_restored_before_completion() {
         let fixture = Fixture::new().await;
         let (handle, task, capture, mut inputs) = fixture.start();
-        for expected in [
-            TactileMode::Smooth,
-            TactileMode::Ratchet,
-            TactileMode::Smooth,
+        for (request, expected) in [
+            (1, TactileMode::Smooth),
+            (2, TactileMode::Ratchet),
+            (3, TactileMode::Smooth),
         ] {
             select(&handle, expected).await;
             assert_eq!(
                 inputs.try_recv().unwrap(),
-                openlogi_hid::CapturedInput::CrownModeApplied(expected)
+                openlogi_hid::CapturedInput::CrownModeApplied {
+                    mode: expected,
+                    request
+                }
             );
         }
         let mut requests = fixture.access.receiver_access.subscribe_requests();
@@ -365,5 +401,40 @@ mod tests {
             openlogi_hid::CaptureSessionOutcome::Restored
         ));
         assert_eq!(fixture.state.lock().unwrap().mode, 2);
+    }
+
+    #[tokio::test]
+    async fn inherited_reconfirmation_reads_current_mode_without_acquiring_a_write_lease() {
+        let fixture = Fixture::new().await;
+        let (handle, task, _capture, mut inputs) = fixture.start();
+        handle.reconfirm();
+        let confirmed = tokio::time::timeout(Duration::from_secs(1), inputs.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            confirmed,
+            openlogi_hid::CapturedInput::CrownModeApplied {
+                mode: TactileMode::Ratchet,
+                request: 1,
+            }
+        );
+        fixture.state.lock().unwrap().mode = 1;
+        handle.reconfirm();
+        let confirmed = tokio::time::timeout(Duration::from_secs(1), inputs.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            confirmed,
+            openlogi_hid::CapturedInput::CrownModeApplied {
+                mode: TactileMode::Smooth,
+                request: 2,
+            }
+        );
+        assert!(task.finish().await.is_none());
+        let state = fixture.state.lock().unwrap();
+        assert_eq!(state.mode, 1, "inherited mode remains device-owned");
+        assert!(state.writes.is_empty());
     }
 }

@@ -99,7 +99,44 @@ impl SessionWheels {
 
 struct CrownSteps {
     output: HidppSessionId,
-    progress: HashMap<ButtonId, f64>,
+    progress: HashMap<ButtonId, CrownStep>,
+}
+
+struct CrownStep {
+    binding: Binding,
+    remainder_percent: u16,
+}
+
+impl CrownSteps {
+    fn advance(
+        &mut self,
+        output: &HidppSessionId,
+        button: ButtonId,
+        binding: &Binding,
+        increments: u8,
+        sensitivity: openlogi_core::rotary::RotarySensitivity,
+    ) -> u16 {
+        if self.output != *output {
+            self.output = output.clone();
+            self.progress.clear();
+        }
+        let step = self.progress.entry(button).or_insert_with(|| CrownStep {
+            binding: binding.clone(),
+            remainder_percent: 0,
+        });
+        if step.binding != *binding {
+            step.binding = binding.clone();
+            step.remainder_percent = 0;
+        }
+        // Hundredths keep every configured percentage exact. Splitting whole
+        // pulses from the fraction keeps both products within u16.
+        let speed = sensitivity.percent();
+        let increments = u16::from(increments);
+        let fractional = step.remainder_percent + increments * (speed % 100);
+        let pulses = increments * (speed / 100) + fractional / 100;
+        step.remainder_percent = fractional % 100;
+        pulses
+    }
 }
 
 /// Input routing plus the per-session state retained between
@@ -262,8 +299,14 @@ impl InputDispatcher {
         input: CapturedInput,
         modifiers: openlogi_core::config::KeyModifiers,
     ) -> bool {
-        if let CapturedInput::CrownModeApplied(mode) = input {
-            self.crown_confirmed.insert(session.epoch(), mode);
+        if let CapturedInput::CrownModeApplied { mode, request } = input {
+            if self
+                .crown_modes
+                .get(&session.epoch())
+                .is_none_or(|handle| handle.accepts(request))
+            {
+                self.crown_confirmed.insert(session.epoch(), mode);
+            }
             return true;
         }
         let handled = self
@@ -370,14 +413,20 @@ impl InputDispatcher {
                 ),
                 plan.momentum.resolve(),
             ),
-            CapturedInput::Interrupted => self.cancel_session(session),
+            CapturedInput::Interrupted => {
+                self.cancel_session(session);
+                self.crown_confirmed.remove(&session.epoch());
+                if let Some(handle) = self.crown_modes.get(&session.epoch()) {
+                    handle.reconfirm();
+                }
+            }
             CapturedInput::HostModeEntered => self.outputs.actions.host_mode_entered(key),
             CapturedInput::ButtonDiverted(_) => {
                 unreachable!("the session's forwarder records diverted buttons instead")
             }
             CapturedInput::CrownTap
             | CapturedInput::CrownRotation(_)
-            | CapturedInput::CrownModeApplied(_) => {}
+            | CapturedInput::CrownModeApplied { .. } => {}
         }
     }
 
@@ -434,18 +483,14 @@ impl InputDispatcher {
         };
         let binding = function.as_ref().map_or_else(
             || {
-                plan.bindings
-                    .get(&control.button())
+                press_binding(plan, control.button(), self.shift_held.active(parent))
                     .cloned()
                     .unwrap_or_else(|| Action::None.into())
             },
             |(_, function, _)| function.binding(control),
         );
         let action = binding.click_action();
-        if let Some(delta) = scroll_for_action(&action, distance.abs()) {
-            self.outputs.post_crown_scroll(&output, delta);
-            return;
-        }
+        let scroll = scroll_for_action(&action, distance.abs());
         let accumulated = self
             .crown_steps
             .entry(parent.epoch())
@@ -453,15 +498,23 @@ impl InputDispatcher {
                 output: output.clone(),
                 progress: HashMap::new(),
             });
-        if accumulated.output != output {
-            accumulated.output = output.clone();
-            accumulated.progress.clear();
+        let pulses = accumulated.advance(
+            &output,
+            control.button(),
+            &binding,
+            if scroll.is_some() {
+                0
+            } else {
+                steps.unsigned_abs()
+            },
+            settings.sensitivity,
+        );
+        if let Some(delta) = scroll {
+            self.outputs.post_crown_scroll(&output, delta);
+            return;
         }
-        let progress = accumulated.progress.entry(control.button()).or_default();
-        *progress += f64::from(steps.unsigned_abs()) * settings.sensitivity.multiplier();
         // An i8 report and validated speed bound this work to 1280 actions.
-        while *progress >= 1.0 {
-            *progress -= 1.0;
+        for _ in 0..pulses {
             self.outputs.actions.dispatch_hidpp_button_pulse(
                 &output,
                 control.button(),

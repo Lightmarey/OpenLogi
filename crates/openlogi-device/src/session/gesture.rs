@@ -133,7 +133,12 @@ pub enum CapturedInput {
     /// Preserves movement between ratchets without treating it as a discrete pulse.
     CrownRotation(crate::crown::CrownMotion),
     /// Confirmed tactile mode, ordered with reports on the capture input channel.
-    CrownModeApplied(openlogi_core::rotary::TactileMode),
+    CrownModeApplied {
+        /// Physical mode confirmed by a readback.
+        mode: openlogi_core::rotary::TactileMode,
+        /// Identity of the capture owner's mode request.
+        request: u64,
+    },
 }
 
 /// HID++-divertable standard buttons: the `0x1b04` control ID and the
@@ -273,6 +278,7 @@ struct GestureCapture {
     thumb_status: Arc<Mutex<RotationStatus>>,
     spy_edges: Arc<Mutex<SpyEdges>>,
     crown_accum: Arc<Mutex<CrownAccum>>,
+    sink: Mutex<Option<mpsc::UnboundedSender<CapturedInput>>>,
 }
 
 impl GestureCapture {
@@ -283,6 +289,7 @@ impl GestureCapture {
             thumb_status: Arc::new(Mutex::new(RotationStatus::Inactive)),
             spy_edges: Arc::default(),
             crown_accum: Arc::default(),
+            sink: Mutex::default(),
         }
     }
 }
@@ -318,6 +325,7 @@ impl ArmedCapture for GestureCapture {
         device_index: u8,
         sink: mpsc::UnboundedSender<CapturedInput>,
     ) -> impl Fn(&v20::Message) + Send + Sync + 'static {
+        *self.sink.lock().unwrap_or_else(PoisonError::into_inner) = Some(sink.clone());
         let armed = &self.armed;
         let accum = Arc::clone(&self.accum);
         let thumb_status = Arc::clone(&self.thumb_status);
@@ -341,10 +349,6 @@ impl ArmedCapture for GestureCapture {
             .map(|wheel| (wheel.feature_index, wheel.per_notch));
         let spy = armed.onboard.as_ref().and_then(ArmedOnboard::spy);
         let spy_edges = Arc::clone(&self.spy_edges);
-        spy_edges
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .attach(sink.clone());
         let crown = crown::report_handler(
             armed.crown.as_ref(),
             Arc::clone(&self.crown_accum),
@@ -426,21 +430,32 @@ impl ArmedCapture for GestureCapture {
     }
 
     fn reset_input_state(&self) {
-        *self.accum.lock().unwrap_or_else(PoisonError::into_inner) = CaptureAccum::default();
-        // A power cycle ends any roll in progress; carrying it over would
-        // swallow the first tap after the reconnect.
-        *self
+        let mut accum = self.accum.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut thumb = self
             .thumb_status
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = RotationStatus::Inactive;
-        self.spy_edges
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut spy = self
+            .spy_edges
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .interrupt();
-        *self
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut crown = self
             .crown_accum
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = CrownAccum::default();
+            .unwrap_or_else(PoisonError::into_inner);
+        *accum = CaptureAccum::default();
+        // A power cycle ends any roll in progress; carrying it over would
+        // swallow the first tap after the reconnect.
+        *thumb = RotationStatus::Inactive;
+        spy.reset();
+        *crown = CrownAccum::default();
+        // Reconnect ends every press in this capture, including a Crown that
+        // keeps native reporting while its separate tactile lease is active.
+        // Retain the input guards until cancellation is queued, so a new press
+        // cannot overtake its predecessor's interruption.
+        if let Some(sink) = &*self.sink.lock().unwrap_or_else(PoisonError::into_inner) {
+            let _ = sink.send(CapturedInput::Interrupted);
+        }
     }
 
     async fn rearm(&self) -> bool {

@@ -1,0 +1,33 @@
+id: device-gesture-interrupt-owner
+language: rust
+severity: error
+message: GestureCapture::reset_input_state owns whole-capture interruption on reconnect.
+files:
+  - crates/openlogi-device/src/session/gesture.rs
+  - crates/openlogi-device/src/session/gesture/**/*.rs
+ignores:
+  - "**/tests.rs"
+  - "**/tests/**"
+rule:
+  all:
+    - pattern: CapturedInput::Interrupted
+    - not:
+        inside:
+          kind: function_item
+          has:
+            field: name
+            regex: '^reset_input_state$'
+          inside:
+            kind: impl_item
+            has:
+              field: type
+              regex: '^GestureCapture$'
+            stopBy: end
+          stopBy: end
+    - not:
+        inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: '^tests$'
+          stopBy: end

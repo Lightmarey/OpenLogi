@@ -236,7 +236,11 @@ async fn a_reconnect_forgets_a_roll_left_open() {
     handler(&wheel_report(0, 0, true));
     assert_eq!(
         received(&mut inputs),
-        vec![scroll(3), CapturedInput::ButtonPulse(ButtonId::Thumbwheel)]
+        vec![
+            scroll(3),
+            CapturedInput::Interrupted,
+            CapturedInput::ButtonPulse(ButtonId::Thumbwheel)
+        ]
     );
 }
 

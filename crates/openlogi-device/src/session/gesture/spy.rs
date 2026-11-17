@@ -413,24 +413,10 @@ pub(super) fn decode_mask(msg: &v20::Message, device_index: u8, spy_index: u8) -
 #[derive(Default)]
 pub(super) struct SpyEdges {
     held: u16,
-    sink: Option<mpsc::UnboundedSender<CapturedInput>>,
 }
 
 impl SpyEdges {
-    /// Where [`Self::interrupt`] reports.
-    pub(super) fn attach(&mut self, sink: mpsc::UnboundedSender<CapturedInput>) {
-        self.sink = Some(sink);
-    }
-
-    /// Forget the held buttons. A mouse that power-cycled reports them up
-    /// only as an unchanged mask, which is no edge, so say their presses
-    /// ended. That is not a release: a waiting click must not run.
-    pub(super) fn interrupt(&mut self) {
-        if self.held != 0
-            && let Some(sink) = &self.sink
-        {
-            let _ = sink.send(CapturedInput::Interrupted);
-        }
+    pub(super) fn reset(&mut self) {
         self.held = 0;
     }
 
@@ -532,14 +518,19 @@ mod tests {
     /// like a release, or a long-press button would run its click.
     #[test]
     fn a_reconnect_interrupts_the_buttons_still_held() {
+        use super::super::{ArmedControls, GestureCapture};
+        use crate::session::capture::ArmedCapture as _;
         let (tx, mut rx) = mpsc::unbounded_channel();
         let captured = host().captured().collect::<Vec<_>>();
-        let mut edges = SpyEdges::default();
-        edges.attach(tx.clone());
-        edges.interrupt(); // nothing held: nothing to say
-        edges.on_mask(0b10_1000, &captured, &tx); // Back, G6 down
-        edges.interrupt();
-        edges.on_mask(0, &captured, &tx); // the woken mouse's all-up report
+        let capture = GestureCapture::new(ArmedControls::default());
+        let _handler = capture.report_handler(0xff, tx.clone());
+        capture
+            .spy_edges
+            .lock()
+            .unwrap()
+            .on_mask(0b10_1000, &captured, &tx);
+        capture.reset_input_state();
+        capture.spy_edges.lock().unwrap().on_mask(0, &captured, &tx);
         let got: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
         assert_eq!(
             got,

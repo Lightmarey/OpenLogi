@@ -60,7 +60,10 @@ async fn crown_motion_uses_the_confirmation_boundary_in_the_ordered_input_stream
     dispatcher.dispatch(
         &parent,
         &policy,
-        CapturedInput::CrownModeApplied(openlogi_core::rotary::TactileMode::Smooth),
+        CapturedInput::CrownModeApplied {
+            mode: openlogi_core::rotary::TactileMode::Smooth,
+            request: 0,
+        },
     );
     dispatcher.dispatch(&parent, &policy, motion);
     let completed = (0..4)
@@ -69,7 +72,10 @@ async fn crown_motion_uses_the_confirmation_boundary_in_the_ordered_input_stream
     dispatcher.dispatch(
         &parent,
         &policy,
-        CapturedInput::CrownModeApplied(openlogi_core::rotary::TactileMode::Ratchet),
+        CapturedInput::CrownModeApplied {
+            mode: openlogi_core::rotary::TactileMode::Ratchet,
+            request: 0,
+        },
     );
     dispatcher.dispatch(&parent, &policy, motion);
     dispatcher.cancel_session(&parent);
@@ -598,4 +604,205 @@ async fn crown_fractional_steps_follow_speed_and_inversion_and_expire_with_the_f
     );
     assert!(dispatcher.crown_steps.is_empty());
     scroll.shutdown();
+}
+
+#[tokio::test]
+async fn direct_crown_rotation_honors_gshift() {
+    let (actions, mut buttons, events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
+    let parent = HidppSessionId::new("craft");
+    let mut policy = plan(None);
+    policy.crown.as_mut().unwrap().profile.set_enabled(false);
+    policy
+        .bindings
+        .insert(ButtonId::CrownTouch, Action::GShift.into());
+    policy
+        .bindings
+        .insert(ButtonId::CrownRight, Action::Copy.into());
+    policy
+        .shift_bindings
+        .insert(ButtonId::CrownRight, Action::Paste.into());
+    dispatcher.dispatch(
+        &parent,
+        &policy,
+        CapturedInput::ButtonDown(ButtonId::CrownTouch),
+    );
+    let mut motion = openlogi_hid::crown::CrownMotion::new(6, 1, true);
+    motion.touched = true;
+    dispatcher.dispatch(&parent, &policy, CapturedInput::CrownRotation(motion));
+    let ButtonRuntimeEvent::Started(press) = events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("shifted rotation action");
+    };
+    let actual = press.start_action().cloned();
+    dispatcher.cancel_session(&parent);
+    assert!(buttons.shutdown());
+    scroll.shutdown();
+    assert_eq!(actual, Some(Action::Paste));
+}
+
+#[tokio::test]
+async fn direct_crown_fractional_steps_do_not_cross_binding_layers() {
+    use openlogi_core::rotary::{RotarySensitivity, RotarySettings};
+    let (actions, mut buttons, events) = test_dispatcher();
+    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+    let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
+    let parent = HidppSessionId::new("craft");
+    let mut policy = plan(None);
+    let profile = &mut policy.crown.as_mut().unwrap().profile;
+    profile.set_enabled(false);
+    profile.set_rotation(
+        RotarySettings::default().with_sensitivity(RotarySensitivity::new(50).unwrap()),
+    );
+    policy
+        .bindings
+        .insert(ButtonId::CrownTouch, Action::GShift.into());
+    policy
+        .bindings
+        .insert(ButtonId::CrownRight, Action::Copy.into());
+    policy
+        .shift_bindings
+        .insert(ButtonId::CrownRight, Action::Paste.into());
+    dispatcher.dispatch(
+        &parent,
+        &policy,
+        CapturedInput::CrownRotation(openlogi_hid::crown::CrownMotion::new(6, 1, true)),
+    );
+    dispatcher.dispatch(
+        &parent,
+        &policy,
+        CapturedInput::ButtonDown(ButtonId::CrownTouch),
+    );
+    let mut motion = openlogi_hid::crown::CrownMotion::new(6, 1, true);
+    motion.touched = true;
+    dispatcher.dispatch(&parent, &policy, CapturedInput::CrownRotation(motion));
+    dispatcher.cancel_session(&parent);
+    assert!(buttons.shutdown());
+    scroll.shutdown();
+    assert!(
+        events.try_iter().next().is_none(),
+        "each layer has only half a step"
+    );
+}
+
+#[test]
+fn crown_step_percentages_accumulate_exactly() {
+    use openlogi_core::rotary::RotarySensitivity;
+    let output = HidppSessionId::new("craft");
+    let binding = Action::Copy.into();
+    for percent in [1, 10, 33, 50, 99, 100, 333, 1000] {
+        let mut steps = super::super::CrownSteps {
+            output: output.clone(),
+            progress: HashMap::new(),
+        };
+        let sensitivity = RotarySensitivity::new(percent).unwrap();
+        let pulses: u16 = (0..100)
+            .map(|_| steps.advance(&output, ButtonId::CrownRight, &binding, 1, sensitivity))
+            .sum();
+        assert_eq!(pulses, percent, "100 reports at {percent}%");
+    }
+}
+
+#[tokio::test]
+async fn reconnect_cancels_crown_output_and_reconfirms_the_current_request() {
+    use crate::hardware::crown::tests::Fixture;
+    use crate::runtime::testing::CancelReason;
+    use openlogi_core::rotary::TactileMode;
+
+    for functions in [false, true] {
+        let fixture = Fixture::new().await;
+        let (handle, task, _capture, mut inputs) = fixture.start();
+        let (actions, mut buttons, events) = test_dispatcher();
+        let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+            false,
+            VerticalScrollSensitivity::DEFAULT,
+        )))
+        .unwrap();
+        let outputs = GestureOutputs::new(actions, scroll.input(), Arc::default(), Arc::default());
+        let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
+        let parent = HidppSessionId::new("craft");
+        let mut policy = touch_plan(None);
+        policy.bindings.clear();
+        let profile = &mut policy.crown.as_mut().unwrap().profile;
+        profile.set_enabled(functions);
+        profile.set_feel(TactileMode::Smooth);
+        let mut configured = profile.functions().to_vec();
+        configured[0]
+            .set_binding(
+                CrownControl::Press,
+                Action::HoldShortcut("F8".parse().unwrap()).into(),
+            )
+            .unwrap();
+        profile.replace_functions(configured).unwrap();
+        dispatcher.register_crown_mode(&parent, handle.clone(), &policy);
+        let previous = tokio::time::timeout(Duration::from_secs(1), inputs.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        dispatcher.dispatch(&parent, &policy, previous);
+        assert_eq!(
+            dispatcher.crown_confirmed.get(&parent.epoch()),
+            Some(&TactileMode::Smooth)
+        );
+        if functions {
+            dispatcher.dispatch(
+                &parent,
+                &policy,
+                CapturedInput::ButtonDown(ButtonId::CrownPress),
+            );
+            assert!(matches!(
+                events.recv_timeout(Duration::from_secs(1)).unwrap(),
+                ButtonRuntimeEvent::Started(_)
+            ));
+        }
+        fixture.power_cycle();
+        dispatcher.dispatch(&parent, &policy, CapturedInput::Interrupted);
+        if functions {
+            assert!(matches!(
+                events.recv_timeout(Duration::from_secs(1)).unwrap(),
+                ButtonRuntimeEvent::Ended {
+                    reason: EndReason::Canceled(CancelReason::SourceEnded),
+                    ..
+                }
+            ));
+        }
+        dispatcher.dispatch(&parent, &policy, previous);
+        assert!(
+            !dispatcher.crown_confirmed.contains_key(&parent.epoch()),
+            "pre-reconnect confirmation is stale"
+        );
+        let confirmed = tokio::time::timeout(Duration::from_secs(1), inputs.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            confirmed,
+            CapturedInput::CrownModeApplied {
+                mode: TactileMode::Smooth,
+                request: 2
+            }
+        );
+        dispatcher.dispatch(&parent, &policy, confirmed);
+        assert_eq!(
+            dispatcher.crown_confirmed.get(&parent.epoch()),
+            Some(&TactileMode::Smooth)
+        );
+        assert!(events.try_iter().next().is_none());
+        dispatcher.cancel_session(&parent);
+        dispatcher.retire_crown_mode(&parent);
+        assert!(task.finish().await.is_none());
+        assert!(buttons.shutdown());
+        scroll.shutdown();
+    }
 }
