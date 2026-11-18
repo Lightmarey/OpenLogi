@@ -10,14 +10,14 @@ description = "Versioned local application controls protocol and Rust client for
 
 [features]
 default = ["client"]
-client = ["dep:interprocess", "dep:tokio", "dep:tokio-util", "dep:futures-util", "dep:sha2", "openlogi-core/fs"]
+client = ["dep:interprocess", "dep:tokio", "dep:tokio-util", "dep:futures-util", "dep:sha2", "dep:serde_json", "openlogi-core/fs"]
 
 [dependencies]
 futures-util = { version = "0.3", features = ["sink"], optional = true }
 interprocess = { workspace = true, optional = true }
 openlogi-core = { path = "../openlogi-core", version = "0.9.0", default-features = false }
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util"], optional = true }
@@ -27,6 +27,7 @@ tokio-util = { version = "0.7", features = ["codec"], optional = true }
 workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 tempfile = "3"
 
 [[example]]
