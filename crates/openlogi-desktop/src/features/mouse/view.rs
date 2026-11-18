@@ -309,7 +309,7 @@ impl MouseModelView {
             shortcut: drafts.map(|drafts| &drafts.shortcut),
             application_input: &self.custom_application_input,
             command_input: &self.custom_command_input,
-            invalid: drafts.map(|drafts| drafts.invalid).unwrap_or_default(),
+            invalid: drafts.map_or_default(|drafts| drafts.invalid),
             view,
         }
     }

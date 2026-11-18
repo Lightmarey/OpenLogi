@@ -242,7 +242,7 @@ async fn tap_selects_once_rotation_uses_selected_function_and_profiles_remember_
     dispatcher.dispatch(
         &session,
         &default,
-        CapturedInput::ButtonPulse(ButtonId::CrownRight),
+        CapturedInput::CrownRotation(openlogi_hid::crown::CrownMotion::new(1, 1, true)),
     );
     let ButtonRuntimeEvent::Started(press) = events.recv_timeout(Duration::from_secs(1)).unwrap()
     else {

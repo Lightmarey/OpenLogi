@@ -14,14 +14,6 @@ use crate::runtime::HidppSessionId;
 
 use super::super::GestureOutputs;
 
-#[derive(Default)]
-enum SelectionPress {
-    #[default]
-    Idle,
-    Pending(SelectionDirection),
-    Consumed,
-}
-
 #[derive(Clone, Copy)]
 enum SelectionDirection {
     Forward,
@@ -45,7 +37,7 @@ struct Session {
     selected: CrownFunctionId,
     touched: bool,
     pressed: bool,
-    selection_press: SelectionPress,
+    selection_press: Option<SelectionDirection>,
 }
 
 impl Session {
@@ -168,7 +160,7 @@ impl CrownFunctions {
                 selected,
                 touched,
                 pressed,
-                selection_press: SelectionPress::default(),
+                selection_press: None,
             });
         handle_input(session, parent, policy, input, modifiers, outputs, plan);
         self.remembered
@@ -180,10 +172,8 @@ impl CrownFunctions {
 fn is_crown_input(input: CapturedInput) -> bool {
     match input {
         CapturedInput::CrownTap | CapturedInput::CrownRotation(_) => true,
-        CapturedInput::ButtonDown(button)
-        | CapturedInput::ButtonUp(button)
-        | CapturedInput::ButtonPulse(button) => {
-            button == ButtonId::CrownTouch || CrownControl::for_button(button).is_some()
+        CapturedInput::ButtonDown(button) | CapturedInput::ButtonUp(button) => {
+            openlogi_core::crown::has_press_edges(button)
         }
         _ => false,
     }
@@ -203,7 +193,7 @@ fn handle_input(
         CapturedInput::ButtonUp(ButtonId::CrownTouch) => session.touched = false,
         CapturedInput::CrownRotation(motion) => {
             if session.pressed && (motion.slots != 0 || motion.ratchets != 0) {
-                session.selection_press = SelectionPress::Consumed;
+                session.selection_press = None;
             }
         }
         CapturedInput::CrownTap => {
@@ -220,18 +210,9 @@ fn handle_input(
                 SelectionDirection::from_modifiers(modifiers),
             );
         }
-        CapturedInput::ButtonDown(button)
-        | CapturedInput::ButtonUp(button)
-        | CapturedInput::ButtonPulse(button) => {
-            let Some(control) = CrownControl::for_button(button) else {
-                return;
-            };
-            if matches!(input, CapturedInput::ButtonDown(ButtonId::CrownPress)) && !session.pressed
-            {
-                session.selection_press =
-                    SelectionPress::Pending(SelectionDirection::from_modifiers(modifiers));
-            }
-            dispatch_control(session, parent, policy, control, input, outputs, plan);
+        CapturedInput::ButtonDown(ButtonId::CrownPress)
+        | CapturedInput::ButtonUp(ButtonId::CrownPress) => {
+            handle_press(session, parent, policy, input, modifiers, outputs, plan);
         }
         _ => return,
     }
@@ -270,66 +251,42 @@ fn select_function(
     }
 }
 
-fn dispatch_control(
+fn handle_press(
     session: &mut Session,
     parent: &HidppSessionId,
     policy: &CrownDispatch,
-    control: CrownControl,
     input: CapturedInput,
+    modifiers: KeyModifiers,
     outputs: &GestureOutputs,
     plan: &DispatchPlan,
 ) {
-    if control == CrownControl::Press
-        && policy.profile.selection_trigger() == CrownSelectionTrigger::Press
-    {
-        match input {
-            CapturedInput::ButtonDown(_) => {
-                session.pressed = true;
-            }
-            CapturedInput::ButtonUp(_) => {
-                session.pressed = false;
-                if let SelectionPress::Pending(direction) =
-                    std::mem::take(&mut session.selection_press)
-                {
-                    select_function(session, parent, policy, outputs, direction);
-                }
-            }
-            _ => {}
+    let pressed = matches!(input, CapturedInput::ButtonDown(_));
+    let reserved = policy.profile.selection_trigger() == CrownSelectionTrigger::Press;
+    if reserved && pressed && !session.pressed {
+        session.selection_press = Some(SelectionDirection::from_modifiers(modifiers));
+    }
+    session.pressed = pressed;
+    if reserved {
+        if !pressed && let Some(direction) = session.selection_press.take() {
+            select_function(session, parent, policy, outputs, direction);
         }
         return;
     }
     let Some(function) = session.function(policy) else {
         return;
     };
-    let binding = function.binding(control);
-    let button = control.button();
-    match input {
-        CapturedInput::ButtonDown(_) => {
-            if control == CrownControl::Press {
-                session.pressed = true;
-            }
-            outputs.actions.try_hidpp_button_down(
-                &session.output,
-                button,
-                Some(&binding),
-                plan.pointer.as_ref().map(|pointer| pointer.press(button)),
-            );
-        }
-        CapturedInput::ButtonUp(_) => {
-            if control == CrownControl::Press {
-                session.pressed = false;
-            }
-            outputs.actions.try_hidpp_button_up(&session.output, button);
-        }
-        CapturedInput::ButtonPulse(_) => {
-            outputs.actions.dispatch_hidpp_button_pulse(
-                &session.output,
-                button,
-                Some(&binding),
-                plan.pointer.as_ref().map(|pointer| pointer.press(button)),
-            );
-        }
-        _ => {}
+    if pressed {
+        let button = ButtonId::CrownPress;
+        outputs.actions.try_hidpp_button_down(
+            &session.output,
+            button,
+            Some(&function.binding(CrownControl::Press)),
+            plan.pointer.as_ref().map(|pointer| pointer.press(button)),
+        );
+    } else {
+        outputs
+            .actions
+            .try_hidpp_button_up(&session.output, ButtonId::CrownPress);
     }
 }
 

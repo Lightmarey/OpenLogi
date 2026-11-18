@@ -173,7 +173,7 @@ impl CrownEditor {
     fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = AppState::try_read(cx);
         let context = state.and_then(AppState::crown_editing_context);
-        let profile = state.map(AppState::crown_profile).unwrap_or_default();
+        let profile = state.map_or_default(AppState::crown_profile);
         if context != self.context {
             self.context = context;
             self.selected = None;
@@ -444,9 +444,7 @@ impl CrownEditor {
 
 impl CrownEditor {
     fn enable_functions(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        let mut profile = AppState::try_read(cx)
-            .map(AppState::crown_profile)
-            .unwrap_or_default();
+        let mut profile = AppState::try_read(cx).map_or_default(AppState::crown_profile);
         if enabled && profile == CrownProfile::default() {
             let mut functions = profile.functions().to_vec();
             for (function, name) in functions.iter_mut().zip([
@@ -751,9 +749,7 @@ impl CrownEditor {
 
 impl Render for CrownEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let profile = AppState::try_read(cx)
-            .map(AppState::crown_profile)
-            .unwrap_or_default();
+        let profile = AppState::try_read(cx).map_or_default(AppState::crown_profile);
         let pal = theme::palette(cx);
         v_flex()
             .size_full()
