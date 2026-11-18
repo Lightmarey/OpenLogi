@@ -1,17 +1,13 @@
 //! The agent link as the loop sees it: one typestate, each phase owning the
 //! facts that are true only in that phase.
 //!
-//! While up the link is an [`Observer`], which owns the client, the generation
-//! ledger, and the one `observe` call in flight — so dropping it cancels the
-//! call, and no answer from a replaced connection can ever be mistaken for the
-//! live one's. [`Down`] owns the outage clock and what the GUI has already been
-//! told about it, so a fresh outage starts with a clean slate by construction
-//! rather than by resetting flags at every reconnect site.
+//! A live link owns state and provider observers on one client. Dropping it
+//! cancels both requests. Down owns the outage clock and its GUI notices.
 
 use std::time::{Duration, Instant};
 
 use openlogi_ipc::client::{ConnectError, Observer, ProtocolSkew};
-use openlogi_ipc::{AgentClient, AgentSnapshot, Observation};
+use openlogi_ipc::{AgentClient, ApplicationProvidersObservation, Observation};
 use tarpc::client::RpcError;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
@@ -27,7 +23,10 @@ const UNREACHABLE_AFTER: Duration = Duration::from_secs(15);
 pub(super) enum Link {
     Down(Down),
     /// A declared, version-matched connection with its observe call in flight.
-    Up(Observer<Observation>),
+    Up {
+        state: Observer<Observation>,
+        providers: Observer<ApplicationProvidersObservation>,
+    },
 }
 
 /// Why there is no connection. The two differ in who else might act.
@@ -126,6 +125,13 @@ impl Down {
 }
 
 impl Link {
+    fn connected(client: AgentClient) -> Self {
+        Self::Up {
+            state: Observer::state(client.clone()),
+            providers: Observer::application_providers(client),
+        }
+    }
+
     /// Down since process start.
     pub(super) fn cold(now: Instant) -> Self {
         Self::Down(Down::new(Outage::Cold, now))
@@ -134,7 +140,7 @@ impl Link {
     /// The live connection dropped. A no-op while already down: the original
     /// outage keeps its start.
     pub(super) fn lose(&mut self, now: Instant) {
-        if matches!(self, Self::Up(_)) {
+        if matches!(self, Self::Up { .. }) {
             *self = Self::Down(Down::new(Outage::Lost, now));
         }
     }
@@ -146,22 +152,22 @@ impl Link {
     /// Discard an observation begun before a pairing command. Its buffered
     /// phase must not overwrite the command's completion or newly started flow.
     pub(super) fn refresh_state(&mut self) {
-        if let Self::Up(observer) = self {
-            *observer = Observer::state(observer.client().clone());
+        if let Self::Up { state, .. } = self {
+            *state = Observer::state(state.client().clone());
         }
     }
 
     pub(super) fn down_mut(&mut self) -> Option<&mut Down> {
         match self {
             Self::Down(down) => Some(down),
-            Self::Up(_) => None,
+            Self::Up { .. } => None,
         }
     }
 
     /// The live client, if any.
     pub(super) fn client(&self) -> Option<&AgentClient> {
         match self {
-            Self::Up(observer) => Some(observer.client()),
+            Self::Up { state, .. } => Some(state.client()),
             Self::Down(_) => None,
         }
     }
@@ -177,7 +183,7 @@ impl Link {
             match effects.connect().await {
                 Ok(client) => {
                     debug!("connected to agent IPC socket");
-                    *self = Self::Up(Observer::state(client));
+                    *self = Self::connected(client);
                 }
                 Err(error) => {
                     if let Some(notice) = down.connect_failed(&error) {
@@ -190,14 +196,14 @@ impl Link {
         self.client()
     }
 
-    /// The next snapshot newer than everything this connection has seen.
-    /// `Ok(None)` is the hold elapsing as a heartbeat, or a stale reply:
-    /// neither moves the window back. Pends forever while down, so a select
-    /// arm on it is simply inert until there is a connection, and cancel-safe
-    /// like the [`Observer::next`] it waits on.
-    pub(super) async fn observed(&mut self) -> Result<Option<AgentSnapshot>, RpcError> {
+    /// The next state or provider update from this connection. Equal generations
+    /// are heartbeats. Pending requests survive canceled waits and end with the link.
+    pub(super) async fn observed(&mut self) -> Result<Option<GuiUpdate>, RpcError> {
         match self {
-            Self::Up(observer) => Ok(observer.next().await?.map(|observed| observed.snapshot)),
+            Self::Up { state, providers } => tokio::select! {
+                observed = state.next() => Ok(observed?.map(|observed| GuiUpdate::Snapshot(Box::new(observed.snapshot)))),
+                observed = providers.next() => Ok(observed?.map(|observed| GuiUpdate::ApplicationProviders(observed.providers))),
+            },
             Self::Down(_) => std::future::pending().await,
         }
     }
@@ -307,7 +313,7 @@ mod tests {
     #[tokio::test]
     async fn losing_the_link_starts_one_fresh_outage() {
         let client = in_memory_agent(|_| Box::pin(std::future::pending()), std::future::pending());
-        let mut link = Link::Up(Observer::state(client));
+        let mut link = Link::connected(client);
         let lost_at = Instant::now();
 
         link.lose(lost_at);

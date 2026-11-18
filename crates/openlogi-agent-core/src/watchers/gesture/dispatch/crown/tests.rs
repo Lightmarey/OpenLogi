@@ -11,6 +11,33 @@ use crate::runtime::testing::{ButtonRuntimeEvent, EndReason, test_dispatcher};
 
 use super::*;
 
+fn test_outputs(
+    applications: Arc<crate::applications::ApplicationHost>,
+) -> (
+    GestureOutputs,
+    crate::runtime::testing::ButtonRuntimeOwner,
+    std::sync::mpsc::Receiver<ButtonRuntimeEvent>,
+    ScrollRuntime,
+) {
+    let (actions, buttons, events) = test_dispatcher();
+    let scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
+        false,
+        VerticalScrollSensitivity::DEFAULT,
+    )))
+    .unwrap();
+    let display = Arc::new(crate::crown::CrownDisplay::with_applications(Arc::clone(
+        &applications,
+    )));
+    let outputs = GestureOutputs::new(
+        actions,
+        scroll.input(),
+        Arc::default(),
+        display,
+        applications,
+    );
+    (outputs, buttons, events, scroll)
+}
+
 fn plan(scope: Option<&str>) -> DispatchPlan {
     let mut profile = CrownProfile::default();
     profile.set_enabled(true);
@@ -45,19 +72,7 @@ fn touch_plan(scope: Option<&str>) -> DispatchPlan {
 
 #[tokio::test]
 async fn crown_motion_uses_the_confirmation_boundary_in_the_ordered_input_stream() {
-    let (actions, mut buttons, events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        Arc::default(),
-        Arc::default(),
-    );
+    let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::default());
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let parent = HidppSessionId::new("craft");
     let policy = plan(None);
@@ -104,19 +119,7 @@ async fn crown_motion_uses_the_confirmation_boundary_in_the_ordered_input_stream
 
 #[tokio::test]
 async fn a_replaced_function_session_uses_the_raw_current_press_state() {
-    let (actions, mut buttons, events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        Arc::default(),
-        Arc::default(),
-    );
+    let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::default());
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let parent = HidppSessionId::new("craft");
     let mut policy = plan(Some("editor"));
@@ -162,22 +165,8 @@ async fn crown_application_inputs_preserve_motion_edges_and_restore_local_action
         .unwrap();
     client.set_context(1, Some(tools(50))).await.unwrap();
     let context = context(&host, &provider.id, 1).await;
-    let (actions, mut buttons, events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let display = Arc::new(crate::crown::CrownDisplay::with_applications(Arc::clone(
-        &host,
-    )));
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        display.clone(),
-        Arc::clone(&host),
-    );
+    let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::clone(&host));
+    let display = Arc::clone(&outputs.crown);
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let parent = HidppSessionId::new("craft");
     let mut policy = touch_plan(Some("editor"));
@@ -319,20 +308,8 @@ async fn crown_application_inputs_preserve_motion_edges_and_restore_local_action
 
 #[tokio::test]
 async fn press_selects_on_release_without_firing_a_binding_and_rotation_consumes_selection() {
-    let (actions, mut buttons, events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let display = Arc::new(crate::crown::CrownDisplay::default());
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        display.clone(),
-        Arc::default(),
-    );
+    let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::default());
+    let display = Arc::clone(&outputs.crown);
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let session = HidppSessionId::new("craft");
     let mut policy = plan(None);
@@ -416,20 +393,8 @@ async fn press_selects_on_release_without_firing_a_binding_and_rotation_consumes
 
 #[tokio::test]
 async fn tap_selects_once_rotation_uses_selected_function_and_profiles_remember_separately() {
-    let (actions, mut buttons, events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let display = Arc::new(crate::crown::CrownDisplay::default());
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        display.clone(),
-        Arc::default(),
-    );
+    let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::default());
+    let display = Arc::clone(&outputs.crown);
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let session = HidppSessionId::new("craft");
     let default = touch_plan(None);
@@ -490,20 +455,8 @@ async fn tap_selects_once_rotation_uses_selected_function_and_profiles_remember_
 
 #[tokio::test]
 async fn press_release_is_balanced_and_stale_cancel_cannot_hide_a_replacement() {
-    let (actions, mut buttons, events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let display = Arc::new(crate::crown::CrownDisplay::default());
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        display.clone(),
-        Arc::default(),
-    );
+    let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::default());
+    let display = Arc::clone(&outputs.crown);
     let mut dispatcher = CrownFunctions::default();
     let old = HidppSessionId::new("craft");
     let current = HidppSessionId::new("craft");
@@ -566,19 +519,7 @@ async fn press_release_is_balanced_and_stale_cancel_cannot_hide_a_replacement() 
 async fn crown_thresholds_and_held_output_use_balanced_upstream_lifecycles() {
     use crate::runtime::testing::CancelReason;
     use openlogi_core::binding::{Binding, LongPressBinding};
-    let (actions, mut buttons, events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        Arc::default(),
-        Arc::default(),
-    );
+    let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::default());
     let mut dispatcher = CrownFunctions::default();
     let mut policy = touch_plan(None);
     let profile = &mut policy.crown.as_mut().unwrap().profile;
@@ -657,20 +598,8 @@ async fn crown_thresholds_and_held_output_use_balanced_upstream_lifecycles() {
 async fn shift_selection_moves_backwards_and_keeps_press_time_direction() {
     use openlogi_core::config::KeyModifiers;
 
-    let (actions, mut buttons, _events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let display = Arc::new(crate::crown::CrownDisplay::default());
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        display.clone(),
-        Arc::default(),
-    );
+    let (outputs, mut buttons, _events, mut scroll) = test_outputs(Arc::default());
+    let display = Arc::clone(&outputs.crown);
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let session = HidppSessionId::new("craft");
     let policy = plan(None);
@@ -714,19 +643,7 @@ async fn shift_selection_moves_backwards_and_keeps_press_time_direction() {
 
 #[tokio::test]
 async fn starter_functions_dispatch_real_rotation_actions() {
-    let (actions, mut buttons, events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        Arc::default(),
-        Arc::default(),
-    );
+    let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::default());
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let session = HidppSessionId::new("craft");
     let policy = plan(None);
@@ -775,19 +692,7 @@ async fn starter_functions_dispatch_real_rotation_actions() {
 #[tokio::test]
 async fn crown_fractional_steps_follow_speed_and_inversion_and_expire_with_the_function() {
     use openlogi_core::rotary::{RotarySensitivity, RotarySettings};
-    let (actions, mut buttons, events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        Arc::default(),
-        Arc::default(),
-    );
+    let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::default());
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let session = HidppSessionId::new("craft");
     let mut policy = plan(None);
@@ -840,19 +745,7 @@ async fn crown_fractional_steps_follow_speed_and_inversion_and_expire_with_the_f
 
 #[tokio::test]
 async fn direct_crown_rotation_honors_gshift() {
-    let (actions, mut buttons, events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        Arc::default(),
-        Arc::default(),
-    );
+    let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::default());
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let parent = HidppSessionId::new("craft");
     let mut policy = plan(None);
@@ -888,19 +781,7 @@ async fn direct_crown_rotation_honors_gshift() {
 #[tokio::test]
 async fn direct_crown_fractional_steps_do_not_cross_binding_layers() {
     use openlogi_core::rotary::{RotarySensitivity, RotarySettings};
-    let (actions, mut buttons, events) = test_dispatcher();
-    let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-        false,
-        VerticalScrollSensitivity::DEFAULT,
-    )))
-    .unwrap();
-    let outputs = GestureOutputs::new(
-        actions,
-        scroll.input(),
-        Arc::default(),
-        Arc::default(),
-        Arc::default(),
-    );
+    let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::default());
     let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
     let parent = HidppSessionId::new("craft");
     let mut policy = plan(None);
@@ -967,19 +848,7 @@ async fn reconnect_cancels_crown_output_and_reconfirms_the_current_request() {
     for functions in [false, true] {
         let fixture = Fixture::new().await;
         let (handle, task, _capture, mut inputs) = fixture.start();
-        let (actions, mut buttons, events) = test_dispatcher();
-        let mut scroll = ScrollRuntime::spawn(Arc::new(ScrollPreferences::new(
-            false,
-            VerticalScrollSensitivity::DEFAULT,
-        )))
-        .unwrap();
-        let outputs = GestureOutputs::new(
-            actions,
-            scroll.input(),
-            Arc::default(),
-            Arc::default(),
-            Arc::default(),
-        );
+        let (outputs, mut buttons, events, mut scroll) = test_outputs(Arc::default());
         let mut dispatcher = super::super::super::InputDispatcher::new(outputs);
         let parent = HidppSessionId::new("craft");
         let mut policy = touch_plan(None);

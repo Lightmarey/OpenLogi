@@ -3,15 +3,15 @@
 use std::sync::{Arc, RwLock, mpsc};
 
 use super::ActionDispatcher;
-pub(crate) use super::button::{ButtonRuntimeEvent, CancelReason, EndReason};
+pub(crate) use super::button::{ButtonRuntimeEvent, ButtonRuntimeOwner, CancelReason, EndReason};
 
 pub(crate) fn test_dispatcher() -> (
     ActionDispatcher,
-    super::button::ButtonRuntimeOwner,
+    ButtonRuntimeOwner,
     mpsc::Receiver<super::button::ButtonRuntimeEvent>,
 ) {
     let (events, received) = mpsc::channel();
-    let owner = super::button::ButtonRuntimeOwner::spawn(move |event| {
+    let owner = ButtonRuntimeOwner::spawn(move |event| {
         events
             .send(event)
             .expect("test receiver should stay connected");

@@ -8,6 +8,12 @@ use openlogi_sdk::{
 };
 use std::time::Duration;
 
+impl ActiveSession {
+    pub(crate) const fn id(self) -> SessionId {
+        self.id
+    }
+}
+
 pub(crate) fn provider(id: &str) -> Provider {
     Provider {
         id: ProviderId::new(id.into()).unwrap(),
@@ -251,7 +257,7 @@ async fn real_connection_routes_inputs_application_values_and_the_read_only_hud(
     let ServerMessage::Activated(activation) = next(&mut client).await else {
         panic!("activation");
     };
-    assert_eq!(activation.session, active.id());
+    assert_eq!(activation.session, active.id);
     assert!(
         !activation
             .source

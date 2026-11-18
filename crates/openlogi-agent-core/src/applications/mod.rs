@@ -78,22 +78,9 @@ impl ControlScope {
 /// An exact activation capability, invalidated on focus, context or connection change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ActiveSession {
+    // IDs are allocated once by this host and removed when their context ends.
+    // A stale capability cannot name its replacement activation.
     id: SessionId,
-    connection: u64,
-    revision: u64,
-}
-
-impl ActiveSession {
-    /// Opaque identity sent to the application.
-    #[must_use]
-    pub const fn id(self) -> SessionId {
-        self.id
-    }
-    /// Context revision required by the application's parameter updates.
-    #[must_use]
-    pub const fn revision(self) -> u64 {
-        self.revision
-    }
 }
 
 struct Registered {
@@ -106,7 +93,6 @@ struct Registered {
 }
 
 struct Active {
-    lease: ActiveSession,
     scope: ControlScope,
     context: ApplicationContext,
     selected: ControlId,
@@ -152,7 +138,7 @@ impl State {
         if let Some(provider) = provider.and_then(|id| self.providers.remove(&id)) {
             provider.queue.close();
             self.active
-                .retain(|_, active| active.lease.connection != connection);
+                .retain(|_, active| active.context.connection != connection);
             self.topology += 1;
             self.parameters += 1;
         }
@@ -174,7 +160,7 @@ impl State {
     fn end(&mut self, session: SessionId, reason: DeactivationReason) {
         if let Some(active) = self.active.remove(&session) {
             self.emit(
-                active.lease.connection,
+                active.context.connection,
                 ServerMessage::Deactivated { session, reason },
             );
             self.parameters += 1;
@@ -358,13 +344,10 @@ impl ApplicationHost {
         };
         let lease = ActiveSession {
             id: SessionId(state.next_id()),
-            connection: context.connection,
-            revision: context.revision,
         };
         state.active.insert(
             lease.id,
             Active {
-                lease,
                 scope,
                 context: context.clone(),
                 selected: selected.clone(),
@@ -391,24 +374,14 @@ impl ApplicationHost {
     /// End exactly this activation, leaving a newer incarnation untouched.
     pub fn end(&self, lease: ActiveSession) {
         let mut state = self.state();
-        if state
-            .active
-            .get(&lease.id)
-            .is_some_and(|active| active.lease == lease)
-        {
-            state.end(lease.id, DeactivationReason::CaptureEnded);
-            self.publish(&state);
-        }
+        state.end(lease.id, DeactivationReason::CaptureEnded);
+        self.publish(&state);
     }
 
     /// Publish a host-owned tool selection in the same ordered queue as input.
     pub fn select(&self, lease: ActiveSession, tool: ControlId) {
         let mut state = self.state();
-        let Some(active) = state
-            .active
-            .get_mut(&lease.id)
-            .filter(|active| active.lease == lease)
-        else {
+        let Some(active) = state.active.get_mut(&lease.id) else {
             return;
         };
         if active.selected == tool
@@ -422,8 +395,9 @@ impl ApplicationHost {
             return;
         }
         active.selected = tool.clone();
+        let connection = active.context.connection;
         state.emit(
-            lease.connection,
+            connection,
             ServerMessage::Selected {
                 session: lease.id,
                 tool,
@@ -435,11 +409,7 @@ impl ApplicationHost {
     /// Route one real adapter input. No socket send runs in this method.
     pub fn input(&self, lease: ActiveSession, event: ControlInput) {
         let mut state = self.state();
-        let Some(active) = state
-            .active
-            .get_mut(&lease.id)
-            .filter(|active| active.lease == lease)
-        else {
+        let Some(active) = state.active.get_mut(&lease.id) else {
             return;
         };
         if matches!(&event, ControlInput::Rotation(rotation) if !rotation.amount.is_finite()) {
@@ -449,8 +419,9 @@ impl ApplicationHost {
         let sequence = active.sequence;
         let tool = active.selected.clone();
         let time_us = u64::try_from(self.started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        let connection = active.context.connection;
         state.emit(
-            lease.connection,
+            connection,
             ServerMessage::Input {
                 session: lease.id,
                 first: sequence,
@@ -467,20 +438,12 @@ impl ApplicationHost {
     #[must_use]
     pub fn values(&self, lease: ActiveSession) -> BTreeMap<ControlId, ParameterState> {
         let state = self.state();
-        let Some(active) = state
-            .active
-            .get(&lease.id)
-            .filter(|active| active.lease == lease)
-        else {
+        let Some(active) = state.active.get(&lease.id) else {
             return BTreeMap::new();
         };
         state
             .providers
             .get(&active.context.provider)
-            .filter(|provider| {
-                provider.connection == lease.connection && provider.revision == lease.revision
-            })
-            .map(|provider| provider.values.clone())
-            .unwrap_or_default()
+            .map_or_default(|provider| provider.values.clone())
     }
 }

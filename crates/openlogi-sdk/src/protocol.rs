@@ -129,7 +129,6 @@ pub struct ControlSource {
 pub enum SelectionInput {
     Press,
     TouchTap,
-    None,
 }
 
 /// One active source and application context.
@@ -235,9 +234,6 @@ pub enum DeactivationReason {
     FocusChanged,
     ContextReplaced,
     CaptureEnded,
-    Disconnected,
-    SlowClient,
-    Shutdown,
 }
 
 /// Structured error category, stable across message wording changes.

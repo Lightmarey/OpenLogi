@@ -191,13 +191,15 @@ impl AppState {
     /// live agent keeps its last status but marks it as reconnecting; any
     /// other link has no live state to mark.
     pub fn agent_link_lost(&mut self) -> StateEvents {
-        match &self.agent.link {
+        let providers = self.set_application_providers(Vec::new());
+        let connection = match &self.agent.link {
             AgentLink::Ready(status) => {
                 let status = status.clone();
                 self.set_agent_link(AgentLink::Reconnecting(status))
             }
             _ => StateEvents::none(),
-        }
+        };
+        providers.and(connection)
     }
     /// Ask the IPC client to try the agent now — connecting, and launching it
     /// if needed — and show the attempt until a snapshot or a fresh

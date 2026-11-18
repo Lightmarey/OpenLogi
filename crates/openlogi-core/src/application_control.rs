@@ -1,5 +1,6 @@
 //! Device-independent application control references and identifier validation.
 
+use nutype::nutype;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -47,69 +48,39 @@ pub struct ControlCapabilities {
 pub struct IdentifierError;
 
 /// A stable application provider reference. It remains valid while offline.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
+#[nutype(
+    validate(with = validate_identifier, error = IdentifierError),
+    derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, AsRef, TryFrom, Into, Serialize, Deserialize)
+)]
 pub struct ProviderId(String);
 
 impl ProviderId {
     /// Validate a provider's stable configuration identity.
     pub fn new(id: String) -> Result<Self, IdentifierError> {
-        validate_identifier(&id)?;
-        Ok(Self(id))
-    }
-}
-
-impl AsRef<str> for ProviderId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for ProviderId {
-    type Error = IdentifierError;
-    fn try_from(id: String) -> Result<Self, Self::Error> {
-        Self::new(id)
-    }
-}
-
-impl From<ProviderId> for String {
-    fn from(id: ProviderId) -> Self {
-        id.0
+        Self::try_new(id)
     }
 }
 
 /// A tool or control identity independent of any physical device.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
+#[nutype(
+    validate(with = validate_identifier, error = IdentifierError),
+    derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, AsRef, TryFrom, Into, Serialize, Deserialize)
+)]
 pub struct ControlId(String);
 
 impl ControlId {
     /// Validate a stable tool or control identity.
     pub fn new(id: String) -> Result<Self, IdentifierError> {
-        validate_identifier(&id)?;
-        Ok(Self(id))
-    }
-}
-impl AsRef<str> for ControlId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-impl TryFrom<String> for ControlId {
-    type Error = IdentifierError;
-    fn try_from(id: String) -> Result<Self, Self::Error> {
-        Self::new(id)
-    }
-}
-impl From<ControlId> for String {
-    fn from(id: ControlId) -> Self {
-        id.0
+        Self::try_new(id)
     }
 }
 
 /// A literal, bounded name shared by application tools and native functions.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
+#[nutype(
+    sanitize(trim),
+    validate(with = validate_label, error = LabelError),
+    derive(Clone, Debug, PartialEq, Eq, AsRef, TryFrom, Into, Serialize, Deserialize)
+)]
 pub struct ControlLabel(String);
 
 /// A label cannot be empty or exceed the HUD's available text budget.
@@ -120,27 +91,15 @@ pub struct LabelError;
 impl ControlLabel {
     /// Trim and validate a literal display name.
     pub fn new(name: &str) -> Result<Self, LabelError> {
-        let name = name.trim();
-        if name.is_empty() || name.chars().count() > 64 {
-            return Err(LabelError);
-        }
-        Ok(Self(name.to_owned()))
+        Self::try_new(name)
     }
 }
-impl AsRef<str> for ControlLabel {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-impl TryFrom<String> for ControlLabel {
-    type Error = LabelError;
-    fn try_from(name: String) -> Result<Self, Self::Error> {
-        Self::new(&name)
-    }
-}
-impl From<ControlLabel> for String {
-    fn from(name: ControlLabel) -> Self {
-        name.0
+
+fn validate_label(name: &str) -> Result<(), LabelError> {
+    if name.is_empty() || name.chars().count() > 64 {
+        Err(LabelError)
+    } else {
+        Ok(())
     }
 }
 

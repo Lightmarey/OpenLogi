@@ -47,7 +47,7 @@ pub struct CrownDisplay {
     published: watch::Sender<Publication>,
     read_brightness: fn() -> ParameterState,
     next_feedback: Arc<AtomicU64>,
-    applications: Option<Arc<crate::applications::ApplicationHost>>,
+    applications: Arc<crate::applications::ApplicationHost>,
 }
 
 impl Default for CrownDisplay {
@@ -56,7 +56,7 @@ impl Default for CrownDisplay {
             visible: Arc::new(Mutex::new(None)),
             read_brightness: native_brightness,
             next_feedback: Arc::new(AtomicU64::new(1)),
-            applications: None,
+            applications: Arc::default(),
             published: watch::channel(Publication {
                 observation: CrownObservation::new(1, None),
                 expires: None,
@@ -72,7 +72,7 @@ impl CrownDisplay {
     #[must_use]
     pub fn with_applications(applications: Arc<crate::applications::ApplicationHost>) -> Self {
         Self {
-            applications: Some(applications),
+            applications,
             ..Self::default()
         }
     }
@@ -140,10 +140,8 @@ impl CrownDisplay {
     fn publish(&self, visible: Option<&Visible>) {
         let hud = visible.map(|active| {
             let mut hud = active.hud.clone();
-            if let Some(application) = active.application
-                && let Some(host) = &self.applications
-            {
-                let values = host.values(application);
+            if let Some(application) = active.application {
+                let values = self.applications.values(application);
                 for function in &mut hud.functions {
                     function.feedback = values
                         .iter()
@@ -230,14 +228,11 @@ impl CrownDisplay {
     pub async fn observe(&self, since: Generation) -> CrownObservation {
         let until = Instant::now() + OBSERVE_HOLD;
         let mut rx = self.published.subscribe();
-        let mut parameters = self
-            .applications
-            .as_ref()
-            .map(|host| host.subscribe_parameters());
+        let mut parameters = self.applications.subscribe_parameters();
         loop {
             self.expire();
             self.refresh_feedback();
-            if self.applications.is_some() {
+            {
                 let visible = self.visible.lock().unwrap_or_else(PoisonError::into_inner);
                 self.publish(visible.as_ref());
             }
@@ -256,10 +251,7 @@ impl CrownDisplay {
                     if changed.is_err() { return self.published.borrow().observation.clone(); }
                 }
                 () = tokio::time::sleep_until(deadline.into()) => {}
-                () = async {
-                    if let Some(parameters) = &mut parameters { let _ = parameters.changed().await; }
-                    else { std::future::pending::<()>().await; }
-                } => {}
+                _ = parameters.changed() => {}
             }
         }
     }

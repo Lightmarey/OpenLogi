@@ -58,7 +58,6 @@ use crate::state::{DeviceKey, FlowPairingRefusal};
 
 mod launch;
 mod link;
-mod providers;
 mod reflex;
 mod request;
 
@@ -310,10 +309,7 @@ pub fn spawn() -> Handle {
     let started = openlogi_core::worker::spawn("openlogi-ipc-client", move |runtime| {
         runtime.block_on(async {
             let mut effects = System;
-            tokio::select! {
-                () = observe_loop(&mut effects, &update_tx, &mut cmd_rx) => {}
-                () = providers::observe(&update_tx) => {}
-            }
+            observe_loop(&mut effects, &update_tx, &mut cmd_rx).await;
         });
     });
     if let Err(error) = started {
@@ -364,13 +360,13 @@ async fn observe_loop(
     let mut retry = ticker(RECONNECT_DELAY);
     loop {
         let woken = tokio::select! {
-            observed = link.observed() => Woken::Observed(observed.map(|snapshot| snapshot.map(Box::new))),
+            observed = link.observed() => Woken::Observed(observed),
             cmd = cmd_rx.recv() => Woken::Command(cmd),
             _ = retry.tick(), if link.is_down() => Woken::Reconnect,
         };
         match woken {
-            Woken::Observed(Ok(Some(snapshot))) => {
-                let _ = update_tx.send(GuiUpdate::Snapshot(snapshot));
+            Woken::Observed(Ok(Some(update))) => {
+                let _ = update_tx.send(update);
             }
             // The agent's heartbeat, or a stale reply: the window is current.
             Woken::Observed(Ok(None)) => {}
@@ -509,7 +505,7 @@ impl OwedReloads {
 enum Woken {
     /// The observe call answered, or its connection dropped. The snapshot is
     /// boxed so the other wakes do not carry its size.
-    Observed(Result<Option<Box<AgentSnapshot>>, RpcError>),
+    Observed(Result<Option<GuiUpdate>, RpcError>),
     /// A device command, or `None` once the GUI drops the sender.
     Command(Option<Command>),
     /// Time to try connecting again.
@@ -595,7 +591,10 @@ mod tests {
                         AgentRequest::ReadDpi { .. } => {
                             Ok(AgentResponse::ReadDpi(Err(WriteError::AmbiguousRawDevice)))
                         }
-                        AgentRequest::Observe { .. } => std::future::pending().await,
+                        AgentRequest::Observe { .. }
+                        | AgentRequest::ObserveApplicationProviders { .. } => {
+                            std::future::pending().await
+                        }
                         other => panic!("the client loop sent an unexpected request: {other:?}"),
                     }
                 })
@@ -831,7 +830,10 @@ mod tests {
                             recorded.lock().unwrap().push(None);
                             Ok(AgentResponse::ReloadConfig(Ok(())))
                         }
-                        AgentRequest::Observe { .. } => std::future::pending().await,
+                        AgentRequest::Observe { .. }
+                        | AgentRequest::ObserveApplicationProviders { .. } => {
+                            std::future::pending().await
+                        }
                         other => panic!("the client loop sent an unexpected request: {other:?}"),
                     }
                 })
@@ -1362,6 +1364,9 @@ mod tests {
                                 snapshot: state,
                             }))
                         }
+                        AgentRequest::ObserveApplicationProviders { .. } => {
+                            std::future::pending().await
+                        }
                         AgentRequest::CancelPairing {} => {
                             release.notify_one();
                             answered.notified().await;
@@ -1403,9 +1408,13 @@ mod tests {
             move |request| {
                 let answers = answers.clone();
                 Box::pin(async move {
-                    let AgentRequest::Observe { .. } = request else {
-                        panic!("the client loop sent an unexpected request: {request:?}");
-                    };
+                    match request {
+                        AgentRequest::Observe { .. } => {}
+                        AgentRequest::ObserveApplicationProviders { .. } => {
+                            return std::future::pending().await;
+                        }
+                        other => panic!("the client loop sent an unexpected request: {other:?}"),
+                    }
                     let next = answers.lock().unwrap().pop_front();
                     match next {
                         Some((generation, snapshot)) => Ok(AgentResponse::Observe(Observation {

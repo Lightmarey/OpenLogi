@@ -71,20 +71,17 @@ impl ApplicationHost {
                     ));
                 }
                 provider.revision = revision;
-                provider.values = tools
-                    .as_ref()
-                    .map(|tools| {
-                        tools
-                            .tools()
-                            .iter()
-                            .filter_map(|tool| Some((tool.id.clone(), tool.parameter.clone()?)))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                provider.values = tools.as_ref().map_or_default(|tools| {
+                    tools
+                        .tools()
+                        .iter()
+                        .filter_map(|tool| Some((tool.id.clone(), tool.parameter.clone()?)))
+                        .collect()
+                });
                 provider.tools = tools;
                 let ended = active
                     .iter()
-                    .filter(|(_, active)| active.lease.connection == connection)
+                    .filter(|(_, active)| active.context.connection == connection)
                     .map(|(id, _)| *id)
                     .collect::<Vec<_>>();
                 for session in ended {
@@ -107,8 +104,8 @@ impl ApplicationHost {
                 active
                     .get(&session)
                     .filter(|active| {
-                        active.lease.connection == connection
-                            && active.lease.revision == context_revision
+                        active.context.connection == connection
+                            && active.context.revision == context_revision
                     })
                     .ok_or(HostError::new(
                         ErrorCode::StaleSession,
